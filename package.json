@@ -1,0 +1,14 @@
+{
+  "name": "cafe-pos-ledger",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local cafe POS ledger app.",
+  "scripts": {
+    "start": "node server.cjs",
+    "check": "node tests/check-syntax.cjs",
+    "test": "node tests/smoke.test.cjs && node tests/flow.test.cjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

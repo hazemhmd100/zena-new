@@ -1,0 +1,2264 @@
+﻿<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0f8b8d" />
+    <title>دفتر المقهى | نظام طاولات وفواتير</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem("cafe-pos-theme");
+          if (theme !== "dark" && theme !== "light") {
+            var saved = localStorage.getItem("cafe-pos-ledger-v1");
+            theme = saved ? JSON.parse(saved).theme : "";
+          }
+          if (theme === "dark") document.documentElement.dataset.theme = "dark";
+        } catch (error) {}
+      }());
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css?v=20261017-dashboard-01" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark" id="brandMark" aria-hidden="true">د</div>
+          <div>
+            <h1 id="brandTitle">دفتر المقهى</h1>
+            <p>طلبات، طاولات، فواتير، وحسابات عملاء</p>
+          </div>
+        </div>
+
+        <nav class="view-tabs" aria-label="التنقل بين الشاشات">
+          <button class="tab-button" data-view="dashboard" type="button">🏠 الرئيسية</button>
+          <button class="tab-button is-active" data-view="pos" type="button">🛒 البيع</button>
+          <button class="tab-button" data-view="invoices" type="button">🧾 الفواتير</button>
+          <button class="tab-button" data-view="customers" type="button">👤 العملاء</button>
+          <span class="tabs-divider" aria-hidden="true"></span>
+          <button class="tab-button" data-view="settings" type="button">📋 الأصناف</button>
+          <button class="tab-button" data-view="purchases" type="button">📦 المشتريات</button>
+          <button class="tab-button" data-view="inventory" type="button">📊 الجرد</button>
+          <button class="tab-button" data-view="expenses" type="button">👷 العمال</button>
+          <span class="tabs-divider" aria-hidden="true"></span>
+          <button class="tab-button" data-view="reports" type="button">📈 التقارير</button>
+          <button class="tab-button tab-button--close" data-view="close" type="button">🔒 إغلاق فترة</button>
+          <button class="tab-button" data-view="guide" type="button">📖 دليل</button>
+        </nav>
+        <div class="topbar-actions">
+          <button class="role-toggle-button" id="roleToggleButton" type="button">مدير</button>
+          <button class="theme-toggle-button" id="themeToggleButton" type="button" title="تبديل الوضع الليلي" aria-label="تبديل الوضع الليلي">
+            <span class="theme-toggle-icon" aria-hidden="true">☾</span>
+            <span class="theme-toggle-text">ليلي</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="backup-reminder-banner" id="backupReminderBanner" hidden>
+        <span id="backupReminderText">⚠️ صار أسبوع ما أخذت نسخة احتياطية — بياناتك كلها على هذا الجهاز فقط!</span>
+        <div class="backup-reminder-actions">
+          <button class="primary-button" id="backupNowButton" type="button">⬇ تصدير نسخة الآن</button>
+          <button class="ghost-button" id="backupLaterButton" type="button">ذكرني بكرة</button>
+        </div>
+      </div>
+
+      <section class="stats-strip" id="statsStrip" aria-label="ملخص سريع">
+        <article>
+          <span>مبيعات اليوم</span>
+          <strong id="statTodaySales">₪0</strong>
+        </article>
+        <article>
+          <span>مشتريات اليوم</span>
+          <strong id="statTodayPurchases">₪0</strong>
+        </article>
+        <article>
+          <span>ربح الأصناف اليوم</span>
+          <strong id="statItemProfit">₪0</strong>
+        </article>
+        <article>
+          <span>صافي الربح اليوم</span>
+          <strong id="statNetProfit">₪0</strong>
+        </article>
+      </section>
+
+      <section class="today-cash-strip" id="todayCashStrip" aria-label="صندوق اليوم"></section>
+
+      <main>
+        <section class="view" id="view-dashboard">
+          <div class="dashboard" id="dashboardContent"></div>
+        </section>
+
+        <section class="view is-active" id="view-pos">
+          <div class="pos-grid">
+            <aside class="panel tables-panel" aria-labelledby="tablesTitle">
+              <div class="panel-header">
+                <div>
+                  <div class="tables-title-row">
+                    <h2 id="tablesTitle">الطاولات</h2>
+                    <span class="open-orders-badge"><strong id="openOrdersBadge">0</strong> طلبات مفتوحة</span>
+                  </div>
+                  <p>اختار طاولة وابدأ الطلب</p>
+                </div>
+                <div class="table-actions" aria-label="إدارة الطاولات">
+                  <button class="icon-button" id="newOrderButton" type="button" title="طلب جديد للطاولة المحددة" aria-label="طلب جديد للطاولة المحددة">
+                    <span aria-hidden="true">↺</span>
+                  </button>
+                  <button class="icon-button" id="addTableButton" type="button" title="إضافة طاولة" aria-label="إضافة طاولة">
+                    <span aria-hidden="true">+</span>
+                  </button>
+                  <button class="icon-button table-merge-button" id="tableMergeButton" type="button" title="دمج/نقل الطاولة المحددة" aria-label="دمج أو نقل الطاولة المحددة">
+                    <span aria-hidden="true">⇄</span>
+                  </button>
+                  <button class="icon-button danger-icon-button" id="deleteTableButton" type="button" title="حذف الطاولة المحددة" aria-label="حذف الطاولة المحددة">
+                    <span aria-hidden="true">−</span>
+                  </button>
+                </div>
+              </div>
+              <input id="tableSearchInput" class="table-search-input" type="search" placeholder="🔎 دوّر على زبون أو طاولة" autocomplete="off" />
+              <div class="tables-grid" id="tablesGrid"></div>
+            </aside>
+
+            <section class="panel order-panel" aria-labelledby="orderTitle">
+              <div class="pos-order-customer-head">
+                <div class="panel-header order-heading">
+                <div>
+                  <h2 id="orderTitle">طلب الطاولة</h2>
+                  <p id="orderSubtitle">طاولة 1</p>
+                </div>
+                <label class="field table-name-field">
+                  <span>اسم الطاولة</span>
+                  <input id="tableNameInput" type="text" placeholder="مثال: طاولة الشباب" autocomplete="off" />
+                </label>
+                <span class="status-pill" id="orderStatus">فارغ</span>
+                </div>
+
+                <details class="pos-collapse" id="customerCollapse">
+                  <summary>👤 العميل <span class="pos-collapse-hint" id="customerCollapseHint">بدون عميل</span></summary>
+                  <div class="customer-row">
+                    <label class="field">
+                      <span>اسم العميل</span>
+                      <input id="customerNameInput" type="text" placeholder="مثال: أبو أحمد" autocomplete="off" />
+                      <div class="suggestions-list" id="customerSuggestions"></div>
+                    </label>
+                    <label class="field">
+                      <span>رقم الجوال</span>
+                      <input id="customerPhoneInput" type="tel" placeholder="مثال: 0590000000" autocomplete="off" />
+                    </label>
+                    <label class="field">
+                      <span>اختيار عميل محفوظ</span>
+                      <select id="customerSelect"></select>
+                    </label>
+                    <button class="primary-button" id="saveCustomerButton" type="button">حفظ عميل</button>
+                  </div>
+                  <div class="pos-customer-account-card" id="posCustomerAccountCard" hidden></div>
+                </details>
+
+                <details class="pos-collapse pos-menu-tools" id="menuToolsCollapse">
+                  <summary>بحث الأصناف <span class="pos-collapse-hint">فتح</span></summary>
+                  <div class="search-row">
+                    <label class="field">
+                      <span>بحث في الأصناف</span>
+                      <input id="menuSearchInput" type="search" placeholder="قهوة، شاي، شيشة..." />
+                    </label>
+                  </div>
+                </details>
+
+                <details class="pos-collapse pos-custom-item-tools">
+                  <summary>➕ صنف مؤقت (خارج المنيو)</summary>
+                  <form class="custom-item-form" id="customItemForm">
+                    <label class="field">
+                      <span>صنف مؤقت</span>
+                      <input id="customItemNameInput" type="text" placeholder="اسم الصنف" autocomplete="off" />
+                    </label>
+                    <label class="field compact">
+                      <span>السعر</span>
+                      <input id="customItemPriceInput" type="number" min="0" step="any" inputmode="decimal" />
+                    </label>
+                    <button class="secondary-button" type="submit">إضافة للطلب</button>
+                  </form>
+                </details>
+              </div>
+
+              <div class="menu-categories" id="menuCategories" aria-label="تصنيفات الأصناف"></div>
+              <div class="menu-grid" id="menuGrid"></div>
+
+            </section>
+
+            <aside class="panel checkout-panel" aria-labelledby="checkoutTitle">
+              <div class="panel-header">
+                <div>
+                  <h2 id="checkoutTitle">المحاسبة</h2>
+                  <p>خصم، دفعات، دين أو رصيد</p>
+                </div>
+              </div>
+
+              <div class="order-list-shell">
+                <div class="section-title">
+                  <h3 id="checkoutOrderTitle">طلب الطاولة</h3>
+                  <button class="ghost-button" id="clearOrderButton" type="button">تفريغ الطلب</button>
+                </div>
+                <div class="order-items" id="orderItems"></div>
+              </div>
+
+              <div class="summary-box checkout-summary">
+                  <div>
+                    <span>المجموع</span>
+                    <strong id="subtotalValue">₪0</strong>
+                  </div>
+                  <label class="field compact">
+                    <span>خصم</span>
+                    <input id="discountInput" type="number" min="0" step="0.5" />
+                  </label>
+                  <div>
+                    <span>الصافي</span>
+                    <strong id="totalValue">₪0</strong>
+                  </div>
+              </div>
+
+              <div class="checkout-settlement">
+
+                <div class="profit-warning" id="profitWarning" hidden>
+                  <span>بيع مخسر</span>
+                  <strong>₪0</strong>
+                </div>
+
+                <div class="payments">
+                  <label class="field compact payment-amount-field">
+                    <span>المبلغ</span>
+                    <input id="paymentAmountInput" type="number" min="0" step="any" inputmode="decimal" />
+                  </label>
+                  <label class="field compact payment-method-field">
+                    <span>طريقة الدفع</span>
+                    <select id="paymentMethodInput">
+                      <option value="cash">كاش</option>
+                      <option value="bank">تطبيق بنك</option>
+                      <option value="wallet">محفظة</option>
+                    </select>
+                  </label>
+                </div>
+
+                <details class="checkout-more" open>
+                  <summary>بيانات الفاتورة</summary>
+                  <div class="checkout-more-content">
+                    <label class="field compact change-return-field">
+                      <span>الراجع للعميل</span>
+                      <input id="changeReturnedInput" type="number" min="0" step="any" inputmode="decimal" placeholder="إذا رجّعت باقي اكتبه هنا" />
+                    </label>
+
+                    <label class="field checkout-note-field">
+                      <span>ملاحظة على الفاتورة</span>
+                      <textarea id="noteInput" rows="3" placeholder="اختياري"></textarea>
+                    </label>
+
+                    <div class="customer-account" id="customerAccountBox">
+                      <span>حساب العميل</span>
+                      <strong>لا يوجد عميل محدد</strong>
+                    </div>
+                  </div>
+                </details>
+              </div>
+
+              <div class="balance-result checkout-balance" id="balanceResult" role="status" aria-live="polite">
+                <span>المتبقي</span>
+                <strong>₪0</strong>
+              </div>
+
+              <div class="checkout-actions">
+                <button class="primary-button wide checkout-close-button" id="closeInvoiceButton" type="button">إغلاق الفاتورة</button>
+                <button class="quick-pay-button" id="quickPayFullButton" type="button">دفع كامل</button>
+                <button class="secondary-button wide" id="splitBillButton" type="button">تقسيم</button>
+                <button class="secondary-button wide" id="printButton" type="button">طباعة آخر فاتورة</button>
+              </div>
+            </aside>
+          </div>
+          <button class="pos-mobile-order-dock" type="button" aria-label="فتح الطلب والمحاسبة">
+            <span>الطلب والمحاسبة</span>
+            <strong aria-live="polite">₪0</strong>
+          </button>
+        </section>
+
+        <section class="view" id="view-customers">
+          <section class="customer-summary-strip" aria-label="ملخص العملاء">
+            <article class="customer-count-summary">
+              <span>عدد العملاء</span>
+              <strong id="customerTotalCount">0</strong>
+            </article>
+            <article class="customer-debt-summary">
+              <span>ديون العملاء</span>
+              <strong id="customerTotalDebt">₪0</strong>
+            </article>
+            <article class="customer-credit-summary">
+              <span>أرصدة العملاء</span>
+              <strong id="customerTotalCredit">₪0</strong>
+            </article>
+          </section>
+
+          <div class="workspace-grid">
+            <section class="panel customers-list-panel">
+              <div class="panel-header">
+                <div>
+                  <h2>العملاء</h2>
+                  <p>كل عميل مع رصيده وديونه</p>
+                </div>
+              </div>
+              <form class="customer-add-form" id="customerAddForm">
+                <label class="field">
+                  <span>اسم العميل</span>
+                  <input id="customerAddNameInput" type="text" placeholder="مثال: أبو أحمد" required />
+                </label>
+                <label class="field">
+                  <span>رقم الجوال</span>
+                  <input id="customerAddPhoneInput" type="tel" placeholder="اختياري" />
+                </label>
+                <button class="primary-button" type="submit">إضافة عميل</button>
+              </form>
+              <div class="customer-filters">
+                <label class="field">
+                  <span>بحث عن عميل</span>
+                  <input id="customerSearchInput" type="search" placeholder="اكتب الاسم أو الهاتف" />
+                </label>
+                <label class="field">
+                  <span>تصفية</span>
+                  <select id="customerStatusFilter">
+                    <option value="all">كل العملاء</option>
+                    <option value="debt">عليهم دين</option>
+                    <option value="oldest-debt">🕐 أقدم دين أولاً</option>
+                    <option value="credit">لهم رصيد</option>
+                    <option value="clear">مسددين</option>
+                  </select>
+                </label>
+              </div>
+              <div class="customers-excel-row">
+                <button class="secondary-button" id="customerExcelExportButton" type="button" data-manager-only>⬇ تصدير Excel</button>
+                <button class="secondary-button" id="customerDebtPrintButton" type="button" data-manager-only>🖨 طباعة الديون</button>
+                <button class="secondary-button" id="customerBulkReminderButton" type="button" data-manager-only>📲 رسائل الديون</button>
+                <label class="secondary-button customer-import-label" data-manager-only>
+                  ⬆ استيراد Excel
+                  <input id="customerExcelImportInput" type="file" accept=".xls,.xlsx,.html,application/vnd.ms-excel" hidden />
+                </label>
+              </div>
+              <div class="customers-list" id="customersList"></div>
+            </section>
+
+            <section class="panel customer-detail-panel">
+              <div class="panel-header">
+                <div>
+                  <h2 id="customerDetailName">اختر عميل</h2>
+                  <p id="customerDetailMeta">لعرض الحساب والحركات</p>
+                </div>
+                <button class="secondary-button" id="customerWhatsappButton" type="button">📲 تذكير واتساب</button>
+                <button class="secondary-button" id="customerStatementButton" type="button" disabled>طباعة كشف حساب</button>
+              </div>
+
+              <div class="customer-kpis" id="customerKpis"></div>
+
+              <form class="settlement-form" id="settlementForm">
+                <div class="section-title">
+                  <h3 id="settlementTitle">تسديد دفعة على الحساب</h3>
+                  <div class="settlement-mode-toggle" id="settlementModeToggle">
+                    <button class="settlement-mode-btn is-active" id="settlementModePayment" type="button">تسديد</button>
+                    <button class="settlement-mode-btn" id="settlementModeDebt" type="button" data-manager-only>إضافة دين</button>
+                    <button class="settlement-mode-btn" id="settlementModeOffset" type="button" data-manager-only hidden>مقاصة مشاريب</button>
+                  </div>
+                </div>
+                <label class="field compact">
+                  <span>المبلغ</span>
+                  <input id="settlementAmountInput" type="number" min="0" step="any" inputmode="decimal" />
+                </label>
+                <button class="secondary-button settlement-fill-button" id="settlementFillBalanceButton" type="button" hidden>تعبئة كامل الدين</button>
+                <label class="field compact" id="settlementDiscountField" style="display:none">
+                  <span>خصم عند التسديد</span>
+                  <input id="settlementDiscountInput" type="number" min="0" step="any" inputmode="decimal" placeholder="اختياري" />
+                </label>
+                <div class="settlement-loss-hint" id="settlementLossHint" hidden></div>
+                <label class="field compact" id="settlementMethodField">
+                  <span>طريقة الدفع</span>
+                  <select id="settlementMethodInput">
+                    <option value="cash">كاش</option>
+                    <option value="bank">تطبيق بنك</option>
+                    <option value="wallet">محفظة</option>
+                  </select>
+                </label>
+                <label class="field compact" id="settlementNoteField" style="display:none">
+                  <span>ملاحظة (اختياري)</span>
+                  <input id="settlementNoteInput" type="text" placeholder="سبب الدين..." />
+                </label>
+                <button class="primary-button" id="settlementSubmitButton" type="submit">تسجيل دفعة</button>
+              </form>
+
+              <div class="section-title" style="margin-top:14px" data-manager-only>
+                <h3>أسعار خاصة</h3>
+              </div>
+              <div class="customer-prices-form" data-manager-only>
+                <label class="field compact">
+                  <span>الصنف</span>
+                  <select id="cpItemSelect"></select>
+                </label>
+                <label class="field compact">
+                  <span>السعر الخاص</span>
+                  <input id="cpPriceInput" type="number" min="0" step="any" inputmode="decimal" placeholder="₪" />
+                </label>
+                <button class="secondary-button" id="cpAddButton" type="button">حفظ</button>
+              </div>
+              <div class="customer-prices-transfer" data-manager-only>
+                <label class="field compact">
+                  <span>نقل الأسعار إلى</span>
+                  <select id="cpTransferTargetInput"></select>
+                </label>
+                <button class="secondary-button" id="cpTransferButton" type="button">نقل الأسعار</button>
+              </div>
+              <div class="customer-prices-list" id="customerPricesList" data-manager-only></div>
+
+              <div class="section-title" style="margin-top:14px">
+                <h3>آخر الحركات</h3>
+              </div>
+              <div class="ledger-list" id="ledgerList"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="view-invoices">
+          <section class="panel invoices-ledger-panel">
+            <div class="panel-header invoices-command-head">
+              <div>
+                <span class="invoices-kicker">سجل الحركة اليومية</span>
+                <h2>الفواتير والحسابات</h2>
+                <p>اختر الفترة، راجع المقبوض والدين، ثم افتح الحركة التي تحتاجها.</p>
+              </div>
+              <details class="invoice-file-tools" data-manager-only>
+                <summary>ملفات ونسخ</summary>
+                <div class="invoice-file-tools-menu">
+                <button class="secondary-button" id="invoiceExcelExportButton" type="button">تصدير Excel</button>
+                <label class="secondary-button file-button">
+                  استيراد Excel
+                  <input id="invoiceExcelImportInput" type="file" accept=".xls,.html,text/html,application/vnd.ms-excel" />
+                </label>
+                <button class="secondary-button" id="internalBackupButton" type="button">حفظ نسخة داخلية</button>
+                <button class="secondary-button" id="exportButton" type="button">حفظ نسخة احتياطية</button>
+                <label class="secondary-button file-button">
+                  استعادة نسخة
+                  <input id="importInput" type="file" accept="application/json" />
+                </label>
+                </div>
+              </details>
+            </div>
+            <div class="invoice-scope-band">
+            <div class="invoice-quick-ranges" id="invoiceQuickRanges" aria-label="اختيار فترة سريعة">
+              <button class="invoice-quick-chip" type="button" data-invoice-quick-range="today">اليوم</button>
+              <button class="invoice-quick-chip" type="button" data-invoice-quick-range="yesterday">أمس</button>
+              <button class="invoice-quick-chip" type="button" data-invoice-quick-range="week">آخر ٧ أيام</button>
+              <button class="invoice-quick-chip" type="button" data-invoice-quick-range="month">هذا الشهر</button>
+              <button class="invoice-quick-chip" type="button" data-invoice-quick-range="all">الكل</button>
+            </div>
+            <div class="invoice-record-quick-filters" id="invoiceRecordQuickFilters" aria-label="نوع الحركة السريع">
+              <button type="button" data-invoice-record-filter="all">كل الحركات</button>
+              <button type="button" data-invoice-record-filter="sale-paid">مدفوع مباشر</button>
+              <button type="button" data-invoice-record-filter="sale-debt">الدين</button>
+              <button type="button" data-invoice-record-filter="payment">التسديدات</button>
+              <button type="button" data-invoice-record-filter="cancelled">الملغاة</button>
+            </div>
+            <div class="invoice-filters">
+              <label class="field compact invoice-search-field">
+                <span>بحث</span>
+                <input id="invoiceSearchInput" type="search" placeholder="رقم، عميل، طاولة، طريقة دفع، أو مبلغ" />
+              </label>
+              <label class="field compact">
+                <span>نوع السجل</span>
+                <select id="invoiceStatusFilter">
+                  <option value="all">كل الحركات</option>
+                  <option value="sales">كل فواتير البيع</option>
+                  <option value="sale-paid">بيع مباشر مدفوع</option>
+                  <option value="sale-debt">بيع بقي منه دين</option>
+                  <option value="sale-credit">دفع زيادة وأصبح له رصيد</option>
+                  <option value="payment">تسديد دين قديم</option>
+                  <option value="manual-debt">دين مضاف يدوياً</option>
+                  <option value="payout">مبلغ دُفع للعميل</option>
+                  <option value="cancelled">فواتير ملغاة</option>
+                  <option value="temporary">فواتير فيها صنف مؤقت</option>
+                </select>
+              </label>
+              <label class="field compact">
+                <span>من تاريخ</span>
+                <input id="invoiceDateFromInput" type="date" />
+              </label>
+              <label class="field compact">
+                <span>إلى تاريخ</span>
+                <input id="invoiceDateToInput" type="date" />
+              </label>
+              <label class="field compact">
+                <span>ترتيب التاريخ</span>
+                <select id="invoiceDateSortInput">
+                  <option value="newest">الأحدث أولاً</option>
+                  <option value="oldest">الأقدم أولاً</option>
+                </select>
+              </label>
+              <button class="secondary-button invoice-clear-filters" type="button" id="invoiceClearFiltersButton" hidden>مسح الفلاتر</button>
+            </div>
+            <div class="invoice-result-line" id="invoiceResultLabel">كل الحركات</div>
+            </div>
+            <div class="invoice-summary-bar invoice-summary-clean">
+              <div class="inv-summary-head">
+                <div class="inv-head-card">
+                  <span>مبيعات الفترة</span>
+                  <strong id="invoiceNetTotal">₪0</strong>
+                  <small>فواتير البيع فقط</small>
+                </div>
+                <div class="inv-head-card is-collected">
+                  <span>المقبوض فعلياً</span>
+                  <strong id="invoicePaidTotal">₪0</strong>
+                  <small>بعد طرح المبالغ المدفوعة للعملاء</small>
+                </div>
+                <div class="inv-head-card is-debt">
+                  <span>دين جديد</span>
+                  <strong id="invoiceStatNewDebt">₪0</strong>
+                  <small>دين بيع + دين يدوي</small>
+                </div>
+                <div class="inv-head-card is-settled">
+                  <span>تسديد ديون قديمة</span>
+                  <strong id="invoiceStatSettled">₪0</strong>
+                  <small>دفعات حساب العملاء فقط</small>
+                </div>
+              </div>
+              <details class="invoice-summary-details">
+                <summary>شرح الأرقام وطرق الدفع</summary>
+                <div class="inv-summary-breakdown">
+                <div class="inv-breakdown-col">
+                  <h6>مصدر المقبوض</h6>
+                  <div class="ledger-line"><span>مدفوع وقت البيع</span><b id="invoiceStatSalePaidAtSale">₪0</b></div>
+                  <div class="ledger-line"><span>مبالغ دُفعت للعملاء</span><b id="invoiceStatPayout">₪0</b></div>
+                </div>
+                <div class="inv-breakdown-col">
+                  <h6>تفاصيل الدين والرصيد</h6>
+                  <div class="ledger-line"><span>دين من فواتير بيع</span><b id="invoiceStatDebt">₪0</b></div>
+                  <div class="ledger-line"><span>دين مضاف يدوياً</span><b id="invoiceStatManualDebt">₪0</b></div>
+                  <div class="ledger-line"><span>خصومات تسديد الديون</span><b id="invoiceStatDebtDiscount">₪0</b></div>
+                  <div class="ledger-line"><span>دفع زيادة وأصبح للعميل رصيد</span><b id="invoiceStatCustomerCredit">₪0</b></div>
+                </div>
+                </div>
+                <div class="invoice-method-breakdown" id="invoicePaymentBreakdown"></div>
+              </details>
+              <small class="invoice-visible-count" id="invoiceNetCount">0 حركة</small>
+            </div>
+            <form class="invoice-edit-form" id="invoiceEditForm" hidden data-manager-only>
+              <div class="section-title">
+                <div>
+                  <span class="invoice-edit-kicker">مساحة تعديل نشطة</span>
+                  <h3 id="invoiceEditTitle">تعديل فاتورة</h3>
+                  <p>أي نقل لعميل آخر ينقل معه أثر الفاتورة على حساب العميل والدين.</p>
+                </div>
+                <button class="secondary-button" id="invoiceEditCancelButton" type="button">إلغاء</button>
+              </div>
+              <label class="field compact">
+                <span>اسم العميل</span>
+                <input id="invoiceEditCustomerInput" type="text" />
+              </label>
+              <label class="field compact">
+                <span>رقم الجوال</span>
+                <input id="invoiceEditPhoneInput" type="tel" />
+              </label>
+              <div class="invoice-transfer-box">
+                <label class="field compact">
+                  <span>نقل إلى عميل محفوظ</span>
+                  <select id="invoiceTransferCustomerInput">
+                    <option value="">اختر عميل</option>
+                  </select>
+                </label>
+                <button class="secondary-button" id="invoiceTransferApplyButton" type="button">اختيار للنقل</button>
+              </div>
+              <label class="field compact">
+                <span>التاريخ</span>
+                <input id="invoiceEditDateInput" type="date" required />
+              </label>
+              <label class="field compact">
+                <span>الطاولة</span>
+                <input id="invoiceEditTableInput" type="text" />
+              </label>
+              <label class="field compact">
+                <span>الصافي</span>
+                <input id="invoiceEditTotalInput" type="number" min="0" step="any" inputmode="decimal" />
+              </label>
+              <label class="field compact">
+                <span>المدفوع</span>
+                <input id="invoiceEditPaidInput" type="number" min="0" step="any" inputmode="decimal" />
+              </label>
+              <label class="field compact" id="invoiceEditDiscountField" hidden>
+                <span>خصم التسديد</span>
+                <input id="invoiceEditDiscountInput" type="number" min="0" step="any" inputmode="decimal" />
+              </label>
+              <label class="field compact">
+                <span>طريقة الدفع</span>
+                <select id="invoiceEditMethodInput">
+                  <option value="cash">كاش</option>
+                  <option value="bank">تطبيق بنك</option>
+                  <option value="wallet">محفظة</option>
+                </select>
+              </label>
+              <section class="invoice-edit-items" id="invoiceEditItemsSection" hidden>
+                <div class="section-title">
+                  <div>
+                    <h3>أصناف الفاتورة</h3>
+                    <p>عدّل الكمية أو السعر، واحذف أو أضف صنف</p>
+                  </div>
+                  <strong id="invoiceEditSubtotalValue">₪0</strong>
+                </div>
+                <div class="invoice-edit-add-row">
+                  <label class="field compact">
+                    <span>إضافة من الأصناف</span>
+                    <select id="invoiceEditMenuItemInput"></select>
+                  </label>
+                  <button class="secondary-button" id="invoiceEditAddMenuItemButton" type="button">إضافة</button>
+                  <label class="field compact">
+                    <span>صنف مؤقت</span>
+                    <input id="invoiceEditCustomNameInput" type="text" placeholder="اسم الصنف" />
+                  </label>
+                  <label class="field compact">
+                    <span>السعر</span>
+                    <input id="invoiceEditCustomPriceInput" type="number" min="0" step="any" inputmode="decimal" />
+                  </label>
+                  <button class="secondary-button" id="invoiceEditAddCustomButton" type="button">إضافة مؤقت</button>
+                </div>
+                <div class="invoice-edit-items-list" id="invoiceEditItemsList"></div>
+              </section>
+              <label class="field invoice-edit-note-field">
+                <span>ملاحظة</span>
+                <textarea id="invoiceEditNoteInput" rows="2"></textarea>
+              </label>
+              <button class="primary-button" type="submit">حفظ تعديل الفاتورة</button>
+            </form>
+            <div class="invoice-table-wrap">
+              <table class="invoice-table">
+                <thead>
+                  <tr>
+                    <th>الفاتورة</th>
+                    <th>العميل</th>
+                    <th>الأصناف</th>
+                    <th>البيع</th>
+                    <th>المقبوض والباقي</th>
+                    <th>الحالة</th>
+                    <th>الإجراءات</th>
+                  </tr>
+                </thead>
+                <tbody id="invoiceTableBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="view-reports">
+          <section class="panel reports-command-panel">
+            <div class="panel-header">
+              <div>
+                <h2>التقارير</h2>
+                <p>اعرف شو انباع، شو انقبض، وين راحت الفلوس، وشو ضل ربح فعلي</p>
+              </div>
+            </div>
+            <div class="report-period-toolbar" id="reportQuickRanges" aria-label="اختيار فترة التقرير">
+              <button type="button" data-report-quick-range="today">اليوم</button>
+              <button type="button" data-report-quick-range="month">هذا الشهر</button>
+              <button class="is-period" id="reportingCurrentButton" type="button" data-report-quick-range="current" disabled>الفترة الحالية</button>
+              <button type="button" data-report-quick-range="custom">تحديد فترة</button>
+              <button id="reportingAllButton" type="button" data-report-quick-range="all">كل السجل</button>
+              <strong id="reportRangeText">كل الفترات</strong>
+            </div>
+            <details class="report-advanced-filters" id="reportAdvancedFilters">
+              <summary>تحديد تاريخ وساعة بدقة</summary>
+              <div class="reports-filter">
+                <label class="field compact"><span>من تاريخ</span><input id="reportDateFromInput" type="date" /></label>
+                <label class="field compact"><span>من ساعة (اختياري)</span><input id="reportTimeFromInput" type="time" /></label>
+                <label class="field compact"><span>إلى تاريخ</span><input id="reportDateToInput" type="date" /></label>
+                <label class="field compact"><span>إلى ساعة (اختياري)</span><input id="reportTimeToInput" type="time" /></label>
+                <button class="secondary-button" id="reportClearTimeButton" type="button">مسح الساعات</button>
+              </div>
+            </details>
+            <details class="reporting-start-settings" id="reportingStartControls">
+              <summary>إعداد بداية النظام الجديد</summary>
+              <div class="reporting-start-body">
+                <strong id="reportingStartStatus">لم تحدد بداية متابعة جديدة</strong>
+                <label class="field compact"><span>تاريخ ووقت البداية</span><input id="reportingStartDateInput" type="datetime-local" step="60" /></label>
+                <button class="secondary-button" id="reportingStartNowButton" type="button">اختيار الوقت الحالي</button>
+                <button class="primary-button" id="reportingStartButton" type="button">حفظ البداية مع نسخة احتياطية</button>
+                <button class="secondary-button" id="reportingHistoryButton" type="button" disabled>عرض ما قبل البداية</button>
+                <button class="secondary-button" id="reportingStartCancelButton" type="button" hidden>إلغاء تحديد البداية</button>
+                <span>السجلات والأرصدة القديمة تبقى محفوظة.</span>
+              </div>
+            </details>
+            <div class="report-output-actions">
+              <button class="secondary-button" id="dayReportButton" type="button">طباعة التقرير</button>
+              <button class="secondary-button" id="reportSoldItemsJumpButton" type="button">الأصناف المباعة</button>
+              <button class="secondary-button" type="button" data-report-special="partners">كشف الشركاء</button>
+              <button class="secondary-button" type="button" data-report-special="handover">تسليم الكافيه</button>
+            </div>
+            <nav class="report-section-tabs" id="reportSectionTabs" aria-label="أقسام التقارير">
+              <button class="report-section-tab is-active" type="button" data-report-section-tab="summary" aria-selected="true">الملخص</button>
+              <button class="report-section-tab" type="button" data-report-section-tab="sales" aria-selected="false">المبيعات</button>
+              <button class="report-section-tab" type="button" data-report-section-tab="cash" aria-selected="false">المال والصندوق</button>
+              <button class="report-section-tab" type="button" data-report-section-tab="expenses" aria-selected="false">التكاليف</button>
+              <button class="report-section-tab" type="button" data-report-section-tab="partners" aria-selected="false">الشركاء</button>
+            </nav>
+            <div class="reports-grid report-section-panel" id="reportSummaryGrid" data-report-section="summary"></div>
+          </section>
+
+          <section class="panel cashbox-panel report-section-panel" data-report-section="cash" hidden>
+            <div class="cashbox-onhand" id="cashOnHandBox"></div>
+          </section>
+
+          <div class="reports-layout">
+            <section class="panel reports-wide-panel report-section-panel" data-report-section="cash" hidden>
+              <div id="reportMoneyMovementOverview"></div>
+            </section>
+            <section class="panel reports-wide-panel report-section-panel" data-report-section="handover" hidden>
+              <div class="section-title handover-actions">
+                <h3>تقرير تسليم الكافيه</h3>
+                <button class="secondary-button" id="handoverAllButton" type="button">كل السجل</button>
+                <button class="secondary-button" id="printHandoverButton" type="button">طباعة التقرير الكامل</button>
+                <button class="secondary-button" id="saveHandoverButton" type="button">حفظ نسخة التقرير</button>
+              </div>
+              <div id="cafeHandoverReport"></div>
+            </section>
+            <section class="panel reports-wide-panel report-section-panel" data-report-section="partners" hidden>
+              <div class="section-title">
+                <h3>كشف جلسة الشركاء</h3>
+                <button class="secondary-button" id="printPartnerMeetingButton" type="button">طباعة الكشف</button>
+              </div>
+              <div id="partnerMeetingReport"></div>
+            </section>
+            <section class="panel reports-wide-panel report-section-panel" id="reportSoldItemsPanel" data-report-section="sales" hidden>
+              <div class="section-title">
+                <h3>الأصناف المباعة</h3>
+                <p>تشمل فواتير الكاش والدين</p>
+              </div>
+              <div class="report-list report-sold-items-list" id="reportItemsList"></div>
+            </section>
+            <section class="panel reports-wide-panel report-section-panel" data-report-section="sales" hidden>
+              <div class="section-title">
+                <h3>📈 مبيعات آخر 14 يوم</h3>
+                <p>نظرة عامة - لا تتبع فلتر الفترة</p>
+              </div>
+              <div class="daily-sales-chart" id="reportDailyChart"></div>
+            </section>
+            <section class="panel reports-wide-panel report-section-panel" data-report-section="sales" hidden>
+              <div class="section-title">
+                <h3>📊 مقارنة بالشهر الماضي</h3>
+                <p>نظرة عامة - لا تتبع فلتر الفترة</p>
+              </div>
+              <div class="report-comparison" id="reportComparison"></div>
+            </section>
+            <section class="panel reports-wide-panel report-section-panel" data-report-section="sales" hidden>
+              <div class="section-title">
+                <h3>💰 ربح كل تصنيف</h3>
+              </div>
+              <div class="report-list" id="reportCategoryList"></div>
+            </section>
+            <section class="panel report-section-panel" data-report-section="sales" hidden>
+              <div class="section-title">
+                <h3>🏆 الأكثر مبيعاً</h3>
+              </div>
+              <div class="report-list" id="reportTopItemsList"></div>
+            </section>
+            <section class="panel report-section-panel" data-report-section="sales" hidden>
+              <div class="section-title">
+                <h3>⏰ أوقات الذروة</h3>
+              </div>
+              <div class="peak-hours-chart" id="reportHoursChart"></div>
+            </section>
+            <section class="panel report-section-panel" data-report-section="cash" hidden>
+              <div class="section-title">
+                <h3>طرق الدفع — كل شيكل وين راح</h3>
+              </div>
+              <div class="report-list" id="reportPaymentsList"></div>
+            </section>
+            <details class="panel cash-ledger-panel report-section-panel" data-report-section="cash" hidden>
+              <summary class="cash-ledger-summary">
+                <div>
+                  <h3>📒 كل الحركات المالية — بالتفصيل</h3>
+                  <p id="cashLedgerSubtitle">كل شيكل دخل، طلع، أو انتقل بين الحسابات</p>
+                </div>
+              </summary>
+              <div class="cash-ledger-body">
+                <div class="cash-ledger-totals" id="cashLedgerTotals"></div>
+                <div class="report-list" id="cashLedgerList"></div>
+              </div>
+            </details>
+            <details class="panel partners-panel report-section-panel" id="partnersPanel" data-report-section="partners" hidden open>
+              <summary class="cash-ledger-summary">
+                <div>
+                  <h3>🤝 الشركاء وتوزيع الأرباح</h3>
+                  <p>عرّف الشركاء ونسبهم — والنظام يحسب حصة كل واحد من الربح وقديش سحب وقديش باقيلو</p>
+                </div>
+              </summary>
+              <div class="partners-body">
+                <form class="partner-add-form" id="partnerAddForm">
+                  <label class="field compact">
+                    <span>اسم الشريك</span>
+                    <input id="partnerNameInput" type="text" placeholder="مثال: أبو أحمد" />
+                  </label>
+                  <label class="field compact">
+                    <span>نسبته من الربح %</span>
+                    <input id="partnerShareInput" type="number" min="0" max="100" step="any" inputmode="decimal" placeholder="مثال: 50" />
+                  </label>
+                  <button class="secondary-button" type="submit">➕ إضافة شريك</button>
+                </form>
+                <div class="partners-list" id="partnersList"></div>
+                <section class="partner-funding-workspace" aria-labelledby="partnerFundingTitle">
+                  <header class="partner-funding-head">
+                    <div>
+                      <h4 id="partnerFundingTitle">حساب تمويل الشريك</h4>
+                      <p>حركات الصندوق التي تخص تمويل الشركاء، منفصلة عن الرواتب والأرباح والمصاريف.</p>
+                    </div>
+                    <span class="partner-funding-protected">محمي من توزيع الأرباح</span>
+                  </header>
+                  <form id="partnerFundingForm" class="partner-funding-form">
+                    <label class="field compact partner-funding-partner-field">
+                      <span>الشريك</span>
+                      <select id="partnerFundingPartnerInput"></select>
+                    </label>
+                    <fieldset class="partner-funding-types">
+                      <legend>نوع الحركة</legend>
+                      <label class="partner-funding-type is-deposit">
+                        <input type="radio" name="partnerFundingType" value="refundable_deposit" checked />
+                        <span><strong>تمويل مسترد</strong><small>فلوس سلّمها الشريك للكافيه وتبقى مستحقة له.</small></span>
+                      </label>
+                      <label class="partner-funding-type is-capital">
+                        <input type="radio" name="partnerFundingType" value="capital_contribution" />
+                        <span><strong>زيادة رأس مال</strong><small>فلوس دائمة في المشروع وليست ربحاً ولا ديناً عادياً.</small></span>
+                      </label>
+                      <label class="partner-funding-type is-refund">
+                        <input type="radio" name="partnerFundingType" value="funding_refund" />
+                        <span><strong>رد تمويل</strong><small>فلوس رجعها الكافيه للشريك من رصيد تمويله المسترد.</small></span>
+                      </label>
+                    </fieldset>
+                    <div class="partner-funding-fields">
+                      <label class="field compact"><span>التاريخ</span><input id="partnerFundingDateInput" type="date" /></label>
+                      <label class="field compact"><span>المبلغ</span><input id="partnerFundingAmountInput" type="number" min="0" step="any" inputmode="decimal" placeholder="0" /></label>
+                      <label class="field compact"><span>طريقة الدفع</span><select id="partnerFundingMethodInput"><option value="cash">كاش</option><option value="bank">بنك</option><option value="wallet">محفظة</option></select></label>
+                      <label class="field compact partner-funding-note"><span>ملاحظة</span><input id="partnerFundingNoteInput" type="text" placeholder="اختياري" /></label>
+                    </div>
+                    <div class="partner-funding-actions">
+                      <button class="primary-button" id="partnerFundingSubmitButton" type="submit">تسجيل حركة التمويل</button>
+                      <button class="secondary-button" id="partnerFundingCancelButton" type="button" hidden>إلغاء التعديل</button>
+                    </div>
+                  </form>
+                  <div class="partner-funding-summary" id="partnerFundingSummary"></div>
+                  <div class="partner-funding-ledger" id="partnerFundingLedger"></div>
+                </section>
+                <section class="partner-withdrawal-workspace" aria-labelledby="partnerWithdrawalTitle">
+                  <header class="partner-withdrawal-head">
+                    <div>
+                      <h4 id="partnerWithdrawalTitle">سحوبات الشريك</h4>
+                      <p>فلوس أخذها الشريك مقابل حصته، ولا تُسجل كمصروف للكافيه.</p>
+                    </div>
+                    <span class="partner-withdrawal-badge">منفصل عن التمويل</span>
+                  </header>
+                  <form id="partnerWithdrawalForm" class="partner-withdrawal-form">
+                    <label class="field compact partner-withdrawal-partner-field">
+                      <span>الشريك</span>
+                      <select id="partnerWithdrawalPartnerInput"></select>
+                    </label>
+                    <fieldset class="partner-withdrawal-types">
+                      <legend>نوع السحب</legend>
+                      <label class="partner-withdrawal-type is-profit">
+                        <input type="radio" name="partnerWithdrawalType" value="profit_withdrawal" checked />
+                        <span><strong>سحب أرباح</strong><small>من ربحه المتاح، ولا يُسجل كمصروف.</small></span>
+                      </label>
+                      <label class="partner-withdrawal-type is-personal">
+                        <input type="radio" name="partnerWithdrawalType" value="personal_withdrawal" />
+                        <span><strong>سحب شخصي</strong><small>يُخصم من حصته الحالية أو القادمة، ولا يُسجل كمصروف.</small></span>
+                      </label>
+                      <label class="partner-withdrawal-type is-personal-return">
+                        <input type="radio" name="partnerWithdrawalType" value="personal_withdrawal_return" />
+                        <span><strong>إرجاع سحب شخصي</strong><small>مبلغ أعاده الشريك للكافي ويخفّض سحبه الشخصي.</small></span>
+                      </label>
+                    </fieldset>
+                    <div class="partner-withdrawal-fields">
+                      <label class="field compact"><span>التاريخ</span><input id="partnerWithdrawalDateInput" type="date" /></label>
+                      <label class="field compact"><span>المبلغ</span><input id="partnerWithdrawalAmountInput" type="number" min="0" step="any" inputmode="decimal" placeholder="0" /></label>
+                      <label class="field compact"><span>طريقة الدفع</span><select id="partnerWithdrawalMethodInput"><option value="cash">كاش</option><option value="bank">بنك</option><option value="wallet">محفظة</option></select></label>
+                      <label class="field compact partner-withdrawal-note"><span>ملاحظة</span><input id="partnerWithdrawalNoteInput" type="text" placeholder="اختياري" /></label>
+                    </div>
+                    <div class="partner-withdrawal-actions">
+                      <button class="primary-button" id="partnerWithdrawalSubmitButton" type="submit">تسجيل السحب</button>
+                      <button class="secondary-button" id="partnerWithdrawalCancelButton" type="button" hidden>إلغاء التعديل</button>
+                    </div>
+                  </form>
+                  <div class="partner-withdrawal-summary" id="partnerWithdrawalSummary"></div>
+                  <div class="partner-withdrawal-ledger" id="partnerWithdrawalLedger"></div>
+                </section>
+                <div class="partners-distribution" id="partnersDistribution"></div>
+              </div>
+            </details>
+            <section class="panel report-section-panel" data-report-section="cash" hidden>
+              <div class="section-title">
+                <h3>العملاء</h3>
+              </div>
+              <div class="report-list" id="reportCustomersList"></div>
+            </section>
+            <section class="panel report-section-panel" data-report-section="sales" hidden>
+              <div class="section-title">
+                <h3>آخر 8 فواتير</h3>
+              </div>
+              <div class="report-list" id="reportInvoicesList"></div>
+            </section>
+            <section class="panel reports-wide-panel report-section-panel" data-report-section="expenses" hidden>
+              <div class="section-title">
+                <h3>المشتريات - آخر 30 حركة</h3>
+              </div>
+              <div class="report-list" id="reportPurchasesList"></div>
+            </section>
+            <section class="panel reports-wide-panel report-section-panel" data-report-section="expenses" hidden>
+              <div class="section-title">
+                <h3>تسديد الموردين - آخر 30 حركة</h3>
+                <p>دفعات خرجت لتسديد حسابات الموردين ضمن الفترة المختارة</p>
+              </div>
+              <div class="report-supplier-payment-total">
+                <span>إجمالي المسدد للموردين بالفترة</span>
+                <strong id="reportSupplierPaymentsTotal">₪0</strong>
+              </div>
+              <div class="report-list" id="reportSupplierPaymentsList"></div>
+            </section>
+            <section class="panel reports-wide-panel report-section-panel" data-report-section="expenses" hidden>
+              <div class="section-title">
+                <h3>المصروفات العامة - آخر 30 حركة</h3>
+              </div>
+              <div class="report-expense-category-summary" id="reportExpenseCategorySummary"></div>
+              <p class="report-duplicate-warning">تنبيه: لا تسجل راتب أو سلفة العامل هنا إذا سجلتها في حساب العامل، حتى لا ينحسب خروج الفلوس مرتين.</p>
+              <div class="report-list" id="reportGeneralExpensesList"></div>
+            </section>
+            <section class="panel reports-wide-panel report-section-panel" data-report-section="expenses" hidden>
+              <div class="section-title">
+                <h3>سجل الجرد والتالف - آخر 30 حركة</h3>
+              </div>
+              <div class="report-list" id="reportInventoryList"></div>
+            </section>
+            <section class="panel reports-wide-panel report-section-panel" data-report-section="expenses" hidden>
+              <div class="section-title">
+                <h3>استهلاك العمال - آخر 30 حركة</h3>
+              </div>
+              <div class="report-list" id="reportExpensesList"></div>
+            </section>
+            <section class="panel reports-wide-panel report-section-panel" data-report-section="expenses" hidden>
+              <div class="section-title">
+                <h3>حركات العمال المالية - آخر 30 حركة</h3>
+              </div>
+              <div class="report-list" id="reportWorkersList"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="view-expenses">
+          <div class="workspace-grid">
+            <section class="panel workers-list-panel">
+              <div class="panel-header">
+                <div>
+                  <h2>العمال</h2>
+                  <p>رواتب العمال وسلفهم وحركاتهم في مكان واحد</p>
+                </div>
+              </div>
+              <form class="customer-add-form worker-add-form" id="workerAddForm">
+                <label class="field">
+                  <span>اسم العامل</span>
+                  <input id="workerAddNameInput" type="text" placeholder="مثال: أحمد" required />
+                </label>
+                <label class="field">
+                  <span>رقم الجوال</span>
+                  <input id="workerAddPhoneInput" type="tel" placeholder="اختياري" />
+                </label>
+                <label class="field compact">
+                  <span>الراتب الشهري</span>
+                  <input id="workerAddSalaryInput" type="number" min="0" step="any" inputmode="decimal" placeholder="اختياري" />
+                </label>
+                <button class="primary-button" type="submit">إضافة عامل</button>
+              </form>
+              <div class="customer-filters">
+                <label class="field">
+                  <span>بحث عن عامل</span>
+                  <input id="workerSearchInput" type="search" placeholder="اكتب الاسم أو الهاتف" />
+                </label>
+                <label class="field">
+                  <span>تصفية</span>
+                  <select id="workerStatusFilter">
+                    <option value="all">كل العمال</option>
+                    <option value="due">لهم راتب</option>
+                    <option value="advance">عليهم سلف</option>
+                    <option value="charged">عليهم مبالغ</option>
+                    <option value="free">عندهم مجاني</option>
+                    <option value="funded">موّلوا الكافي</option>
+                    <option value="active">عندهم حركات</option>
+                  </select>
+                </label>
+              </div>
+              <div class="customer-summary-strip worker-summary-strip">
+                <article class="customer-credit-summary">
+                  <span>المستحق للعمال حالياً</span>
+                  <strong id="workerTotalDue">₪0</strong>
+                </article>
+                <article class="customer-debt-summary">
+                  <span>السلف القائمة</span>
+                  <strong id="workerTotalAdvance">₪0</strong>
+                </article>
+                <article>
+                  <span>رواتب مدفوعة</span>
+                  <strong id="workerTotalSalaryPaid">₪0</strong>
+                </article>
+                <article>
+                  <span>مبالغ استلمناها منهم</span>
+                  <strong id="workerTotalPaymentIn">₪0</strong>
+                </article>
+                <article class="worker-funding-summary">
+                  <span>تمويل العمال المتبقي</span>
+                  <strong id="workerTotalCafeFunding">₪0</strong>
+                </article>
+              </div>
+              <div class="customers-list" id="workersList"></div>
+            </section>
+
+            <section class="panel customer-detail-panel">
+              <div class="panel-header">
+                <div>
+                  <h2 id="workerDetailName">اختر عامل</h2>
+                  <p id="workerDetailMeta">لعرض حساب العامل وحركاته</p>
+                </div>
+                <div class="worker-partner-actions" id="workerPartnerActions"></div>
+              </div>
+
+              <nav class="worker-section-tabs" role="tablist" aria-label="أقسام حساب العامل">
+                <button class="worker-section-tab is-active" type="button" role="tab" data-worker-section-tab="account" aria-selected="true">الحساب والحركات</button>
+                <button class="worker-section-tab" type="button" role="tab" data-worker-section-tab="drinks" aria-selected="false">المشروبات</button>
+                <button class="worker-section-tab" type="button" role="tab" data-worker-section-tab="salary" aria-selected="false">الراتب والإجازات</button>
+                <button class="worker-section-tab" type="button" role="tab" data-worker-section-tab="partner" aria-selected="false">حساب الشريك</button>
+              </nav>
+
+              <div class="worker-account-period" id="workerAccountPeriod"></div>
+
+              <div class="worker-section-panel" data-worker-section-panel="salary" hidden>
+              <div class="worker-period-row" id="workerPeriodRow" hidden>
+                <label class="field compact">
+                  <span>بداية فترة العامل</span>
+                  <input id="workerOwnPeriodInput" type="date" />
+                </label>
+                <label class="field compact">
+                  <span>🏁 نهاية العمل (لو خلّص)</span>
+                  <input id="workerEndDateInput" type="date" />
+                </label>
+                <button class="secondary-button" id="workerOwnPeriodResetButton" type="button">↺ من آخر إغلاق</button>
+                <button class="secondary-button" id="workerEndDateClearButton" type="button" hidden>♻ رجّعه شغّال</button>
+              </div>
+              </div>
+
+              <div class="customer-kpis worker-account-kpis" id="workerKpis" data-worker-section-panel="account"></div>
+
+              <div class="worker-section-panel worker-partner-account" data-worker-section-panel="partner" hidden>
+                <div id="workerPartnerAccountEmpty" class="empty-state"></div>
+                <div id="workerPartnerAccountContent" hidden>
+                  <div class="worker-partner-summary" id="workerPartnerAccountSummary"></div>
+                  <div class="worker-partner-entry-grid">
+                    <form class="worker-partner-entry-form" id="workerPartnerFundingForm">
+                      <div class="section-title"><h3>إضافة تمويل للشريك</h3></div>
+                      <label class="field compact"><span>نوع الحركة</span><select id="workerPartnerFundingTypeInput"><option value="refundable_deposit">تمويل مسترد</option><option value="capital_contribution">زيادة رأس مال</option><option value="funding_refund">رد تمويل للشريك</option></select></label>
+                      <label class="field compact"><span>المبلغ</span><input id="workerPartnerFundingAmountInput" type="number" min="0" step="any" inputmode="decimal" required /></label>
+                      <label class="field compact"><span>التاريخ</span><input id="workerPartnerFundingDateInput" type="date" required /></label>
+                      <label class="field compact"><span>الطريقة</span><select id="workerPartnerFundingMethodInput"><option value="cash">كاش</option><option value="bank">تطبيق بنك</option><option value="wallet">محفظة</option></select></label>
+                      <label class="field worker-partner-note"><span>ملاحظة</span><input id="workerPartnerFundingNoteInput" type="text" placeholder="اختياري" /></label>
+                      <button class="primary-button" id="workerPartnerFundingSubmitButton" type="submit">تسجيل التمويل</button>
+                      <button class="secondary-button" id="workerPartnerFundingCancelButton" type="button" hidden>إلغاء التعديل</button>
+                    </form>
+                    <form class="worker-partner-entry-form" id="workerPartnerWithdrawalForm">
+                      <div class="section-title"><h3>إضافة سحب للشريك</h3></div>
+                      <label class="field compact"><span>نوع الحركة</span><select id="workerPartnerWithdrawalTypeInput"><option value="profit_withdrawal">سحب أرباح</option><option value="personal_withdrawal">سحب شخصي</option><option value="personal_withdrawal_return">إرجاع سحب شخصي</option></select></label>
+                      <label class="field compact"><span>المبلغ</span><input id="workerPartnerWithdrawalAmountInput" type="number" min="0" step="any" inputmode="decimal" required /></label>
+                      <label class="field compact"><span>التاريخ</span><input id="workerPartnerWithdrawalDateInput" type="date" required /></label>
+                      <label class="field compact"><span>الطريقة</span><select id="workerPartnerWithdrawalMethodInput"><option value="cash">كاش</option><option value="bank">تطبيق بنك</option><option value="wallet">محفظة</option></select></label>
+                      <label class="field worker-partner-note"><span>ملاحظة</span><input id="workerPartnerWithdrawalNoteInput" type="text" placeholder="اختياري" /></label>
+                      <button class="primary-button" id="workerPartnerWithdrawalSubmitButton" type="submit">تسجيل السحب</button>
+                      <button class="secondary-button" id="workerPartnerWithdrawalCancelButton" type="button" hidden>إلغاء التعديل</button>
+                    </form>
+                  </div>
+                  <div class="section-title"><div><h3>سجل تمويل وسحوبات الشريك</h3><small id="workerPartnerLedgerFilterSummary">كل الحركات</small></div></div>
+                  <div class="worker-partner-ledger-filters">
+                    <label class="field compact"><span>عرض</span><select id="workerPartnerLedgerTypeFilter"><option value="all">التمويل والسحوبات</option><option value="withdrawal">السحوبات فقط</option><option value="funding">التمويل فقط</option></select></label>
+                    <label class="field compact"><span>من تاريخ</span><input id="workerPartnerLedgerDateFromInput" type="date" /></label>
+                    <label class="field compact"><span>إلى تاريخ</span><input id="workerPartnerLedgerDateToInput" type="date" /></label>
+                    <button class="secondary-button" id="workerPartnerLedgerClearButton" type="button">مسح التاريخ</button>
+                  </div>
+                  <div class="worker-partner-period-summary" id="workerPartnerPeriodSummary"></div>
+                  <div class="worker-partner-ledger" id="workerPartnerAccountLedger"></div>
+                </div>
+              </div>
+
+              <div class="worker-section-panel" data-worker-section-panel="salary" hidden>
+              <div class="section-title">
+                <h3>💵 الراتب الشهري ورفعه</h3>
+              </div>
+              <form class="expense-form worker-raise-form" id="workerRaiseForm">
+                <label class="field compact">
+                  <span>الراتب الجديد (شهري)</span>
+                  <input id="workerRaiseSalaryInput" type="number" min="0" step="any" inputmode="decimal" placeholder="₪" />
+                </label>
+                <label class="field compact">
+                  <span>ساري من تاريخ</span>
+                  <input id="workerRaiseDateInput" type="date" />
+                </label>
+                <button class="primary-button" type="submit">رفع الراتب</button>
+              </form>
+              <div class="worker-salary-history" id="workerSalaryHistory"></div>
+
+              <div class="section-title">
+                <h3>🏖 تسجيل إجازة (بدون راتب)</h3>
+              </div>
+              <form class="expense-form worker-leave-form" id="workerLeaveForm">
+                <label class="field compact">
+                  <span>من تاريخ</span>
+                  <input id="workerLeaveFromInput" type="date" required />
+                </label>
+                <label class="field compact">
+                  <span>إلى تاريخ</span>
+                  <input id="workerLeaveToInput" type="date" required />
+                </label>
+                <label class="field expense-note-field">
+                  <span>ملاحظة</span>
+                  <input id="workerLeaveNoteInput" type="text" placeholder="مثال: إجازة سنوية، مرضية..." />
+                </label>
+                <button class="primary-button" id="workerLeaveSubmitButton" type="submit">تسجيل الإجازة</button>
+              </form>
+              </div>
+
+              <div class="worker-section-panel" data-worker-section-panel="account">
+              <div class="worker-account-note">سجّل راتب العامل أو سلفته هنا فقط حتى لا ينحسب المبلغ مرة ثانية ضمن المصاريف.</div>
+              <div class="section-title">
+                <h3>حركة مالية للعامل</h3>
+              </div>
+              <form class="expense-form worker-transaction-form" id="workerTransactionForm">
+                <label class="field compact">
+                  <span>التاريخ</span>
+                  <input id="workerTransactionDateInput" type="date" required />
+                </label>
+                <label class="field compact">
+                  <span>الحركة</span>
+                  <select id="workerTransactionTypeInput">
+                    <option value="advance">سلفة</option>
+                    <option value="salary_payment">دفع راتب للعامل</option>
+                    <option value="payment_in">استلام مبلغ من العامل</option>
+                    <option value="cafe_funding">تمويل من العامل للكافي (خارج حسابه)</option>
+                    <option value="cafe_funding_refund">إرجاع تمويل للعامل (خارج حسابه)</option>
+                  </select>
+                </label>
+                <label class="field compact expense-amount-field">
+                  <span>المبلغ</span>
+                  <input id="workerTransactionAmountInput" type="number" min="0" step="any" inputmode="decimal" placeholder="اكتب المبلغ" required />
+                </label>
+                <label class="field compact">
+                  <span>طريقة الدفع</span>
+                  <select id="workerTransactionMethodInput">
+                    <option value="cash">كاش</option>
+                    <option value="bank">تطبيق بنك</option>
+                    <option value="wallet">محفظة</option>
+                  </select>
+                </label>
+                <label class="field expense-note-field">
+                  <span>ملاحظة</span>
+                  <textarea id="workerTransactionNoteInput" rows="2" placeholder="اختياري"></textarea>
+                </label>
+                <button class="primary-button" id="workerTransactionSubmitButton" type="submit">تسجيل سلفة</button>
+                <button class="secondary-button" id="workerTransactionCancelEditButton" type="button" hidden>إلغاء التعديل</button>
+              </form>
+              </div>
+
+              <div class="worker-section-panel" data-worker-section-panel="drinks" hidden>
+              <div class="section-title">
+                <h3>مشروبات العامل</h3>
+              </div>
+              <form class="expense-form" id="expenseForm">
+                <input id="expenseTitleInput" type="hidden" />
+                <div class="consumption-type-toggle" id="consumptionTypeToggle" role="group" aria-label="نوع الاستهلاك">
+                  <button type="button" class="consumption-type-btn is-active" data-consumption-type="worker_price">💵 دفعها</button>
+                  <button type="button" class="consumption-type-btn" data-consumption-type="salary">📉 خصم من راتبه</button>
+                  <button type="button" class="consumption-type-btn" data-consumption-type="free">🎁 مجاني</button>
+                </div>
+                <label class="field compact">
+                  <span>التاريخ</span>
+                  <input id="expenseDateInput" type="date" required />
+                </label>
+                <label class="auto-backup-row expense-no-item-row" id="expenseNoItemField">
+                  <input type="checkbox" id="expenseNoItemToggle" />
+                  <span>مبلغ فقط، بدون صنف من المخزون</span>
+                </label>
+                <label class="field compact" id="workerItemField">
+                  <span>الصنف</span>
+                  <select id="workerItemInput"></select>
+                </label>
+                <label class="field compact" id="workerQtyField">
+                  <span>الكمية</span>
+                  <input id="workerQtyInput" type="number" min="0" step="any" inputmode="decimal" value="1" required />
+                </label>
+                <label class="field compact" id="expenseNoItemLabelField" hidden>
+                  <span>وصف المبلغ</span>
+                  <input id="expenseNoItemLabelInput" type="text" placeholder="مثال: مشروبات متنوعة" />
+                </label>
+                <label class="field compact expense-amount-field" id="expenseAmountField">
+                  <span id="expenseAmountLabel">السعر اللي دفعه للوحدة</span>
+                  <input id="expenseAmountInput" type="number" min="0" step="any" inputmode="decimal" placeholder="0" />
+                </label>
+                <label class="field compact" id="expenseMethodField">
+                  <span>طريقة الدفع</span>
+                  <select id="expenseMethodInput">
+                    <option value="cash">كاش</option>
+                    <option value="bank">تطبيق بنك</option>
+                    <option value="wallet">محفظة</option>
+                  </select>
+                </label>
+                <label class="field expense-note-field">
+                  <span>ملاحظة</span>
+                  <textarea id="expenseNoteInput" rows="2" placeholder="اختياري"></textarea>
+                </label>
+                <button class="primary-button" id="expenseSubmitButton" type="submit">تسجيل مشروب العامل</button>
+                <button class="secondary-button" id="expenseCancelEditButton" type="button" hidden>إلغاء التعديل</button>
+              </form>
+              </div>
+
+              <div class="worker-section-panel" data-worker-section-panel="account">
+              <div class="section-title worker-ledger-title-row">
+                <div>
+                  <h3>آخر حركات العامل</h3>
+                  <small id="workerLedgerResultLabel">كل الحركات</small>
+                </div>
+                <label class="field compact worker-ledger-filter-field">
+                  <span>تصفية السجل</span>
+                  <select id="workerLedgerFilterInput">
+                    <option value="all">كل الحركات</option>
+                    <option value="financial">الدفعات والسلف فقط</option>
+                    <option value="advance">السلف فقط</option>
+                    <option value="salary_payment">دفعات الراتب للعامل</option>
+                    <option value="payment_in">دفعات من العامل</option>
+                    <option value="cafe_funding_activity">تمويل العامل وإرجاعه</option>
+                    <option value="drink">المشروبات فقط</option>
+                    <option value="leave">الإجازات فقط</option>
+                  </select>
+                </label>
+              </div>
+              <div class="ledger-list" id="workerLedgerList"></div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="view-purchases">
+          <section class="purchases-command-center panel" aria-labelledby="purchasesCenterTitle">
+            <div class="purchases-command-copy">
+              <span class="purchases-kicker">إدارة الشراء</span>
+              <h2 id="purchasesCenterTitle">المشتريات</h2>
+              <p>كل عملية في مكانها: بضاعة، مصروف، سجل، أو حساب مورد.</p>
+            </div>
+          </section>
+
+          <nav class="purchase-section-tabs" role="tablist" aria-label="أقسام المشتريات">
+            <button class="purchase-section-tab is-active" type="button" role="tab" data-purchase-section-tab="invoice" aria-selected="true" aria-controls="purchaseInvoicePane">فاتورة جديدة</button>
+            <button class="purchase-section-tab" type="button" role="tab" data-purchase-section-tab="expenses" aria-selected="false" aria-controls="purchaseExpensesPane">المصاريف</button>
+            <button class="purchase-section-tab" type="button" role="tab" data-purchase-section-tab="records" aria-selected="false" aria-controls="purchaseRecordsPane">السجل</button>
+            <button class="purchase-section-tab" type="button" role="tab" data-purchase-section-tab="suppliers" aria-selected="false" aria-controls="purchaseSuppliersPane">الموردون</button>
+          </nav>
+
+          <section class="purchase-global-filters" aria-label="بحث وفترة كل أقسام المشتريات">
+            <input id="purchaseRecordFilterInput" type="hidden" value="all" />
+            <input id="purchaseExpensePurposeFilterInput" type="hidden" value="all" />
+            <label class="field compact purchase-history-search-field">
+              <span>بحث في الكل</span>
+              <input id="purchaseSearchInput" type="search" placeholder="بضاعة، مصروف، مورد، رقم أو ملاحظة" />
+            </label>
+            <label class="field compact">
+              <span>من تاريخ</span>
+              <input id="purchaseDateFromInput" type="date" />
+            </label>
+            <label class="field compact">
+              <span>إلى تاريخ</span>
+              <input id="purchaseDateToInput" type="date" />
+            </label>
+            <label class="field compact">
+              <span>ترتيب التاريخ</span>
+              <select id="purchaseDateSortInput">
+                <option value="newest">الأحدث أولاً</option>
+                <option value="oldest">الأقدم أولاً</option>
+              </select>
+            </label>
+          </section>
+
+          <div class="purchases-workspace">
+            <section class="panel purchase-section-pane" id="purchaseInvoicePane" role="tabpanel" data-purchase-section-panel="invoice">
+              <div class="panel-header"><div><h2>فاتورة بضاعة جديدة</h2><p>أدخل بيانات الفاتورة، أضف الأصناف، ثم حدد الدفع واحفظ.</p></div></div>
+              <div class="purchase-invoice-meta">
+                <label class="field purchase-supplier-field">
+                  <span>المورد</span>
+                  <input id="purchaseSupplierInput" type="text" list="supplierNameOptions" placeholder="اختياري إذا كانت الفاتورة مدفوعة بالكامل" autocomplete="off" />
+                </label>
+                <label class="field compact">
+                  <span>تاريخ الفاتورة</span>
+                  <input id="purchaseDateInput" type="date" required />
+                </label>
+              </div>
+
+              <form class="purchase-form purchase-invoice-form" id="purchaseForm">
+                <div class="section-title purchase-form-title"><h3>إضافة بضاعة للمخزون</h3></div>
+                <input id="purchaseMenuItemInput" type="hidden" value="" />
+                <label class="field purchase-item-name-field"><span>اسم المادة</span><input id="purchaseItemInput" type="text" placeholder="مثال: قهوة خام أو فحم" required /></label>
+                <label class="field compact"><span>عدد العبوات المشتراة</span><input id="purchaseQtyInput" type="number" min="0" step="any" inputmode="decimal" required /></label>
+                <label class="field compact"><span>وحدة الشراء</span><input id="purchaseUnitInput" type="text" list="purchaseUnitOptions" placeholder="كيس، علبة، كيلو" /></label>
+                <datalist id="purchaseUnitOptions">
+                  <option value="غرام"></option><option value="كيلو"></option><option value="قطعة"></option><option value="كيس"></option><option value="علبة"></option><option value="كاسة"></option><option value="رأس"></option>
+                </datalist>
+                <label class="field compact"><span>كل عبوة تحتوي</span><input id="purchaseStockQtyInput" type="number" min="0" step="any" inputmode="decimal" placeholder="مثال: 100" /></label>
+                <label class="field compact"><span>وحدة المخزون</span><input id="purchaseStockUnitInput" type="text" list="purchaseUnitOptions" placeholder="غرام، كاسة، قطعة" /></label>
+                <label class="field compact"><span>سعر الحبة / العبوة</span><input id="purchaseUnitPriceInput" type="number" min="0" step="any" inputmode="decimal" placeholder="يحسب الإجمالي تلقائياً" /></label>
+                <label class="field compact"><span>مبلغ الصنف</span><input id="purchaseAmountInput" type="number" min="0" step="any" inputmode="decimal" required /></label>
+                <div class="purchase-unit-field"><span>تكلفة وحدة المخزون</span><strong id="purchaseUnitCostValue">₪0</strong></div>
+                <button class="primary-button purchase-add-item-button" type="submit">إضافة للفاتورة</button>
+              </form>
+
+              <div class="purchase-draft" id="purchaseDraftBox">
+                <div class="purchase-draft-header">
+                  <div><strong id="purchaseDraftTitle">بنود الفاتورة الحالية</strong><small id="purchaseDraftSubtitle">أضف أصناف البضاعة</small></div>
+                  <div class="purchase-draft-total"><span id="purchaseDraftTotal">₪0</span><small id="purchaseDiscountSummary" hidden></small></div>
+                </div>
+                <div class="purchase-draft-list" id="purchaseDraftList"></div>
+              </div>
+
+              <div class="purchase-settlement">
+                <div class="section-title purchase-form-title"><h3>الخصم والدفع</h3></div>
+                <input id="purchaseMethodInput" type="hidden" value="cash" />
+                <input id="purchasePaidInput" type="hidden" value="" />
+                <label class="field compact purchase-discount-field"><span>خصم الفاتورة</span><input id="purchaseDiscountInput" type="number" min="0" step="any" inputmode="decimal" placeholder="0" /></label>
+                <label class="field compact purchase-credit-field"><span>رصيد مستخدم من المورد</span><input id="purchaseSupplierCreditUsedInput" type="number" min="0" step="any" inputmode="decimal" placeholder="0" /></label>
+                <div class="purchase-payment-box">
+                  <div class="purchase-payment-head"><strong>المدفوع الآن</strong><small>اترك الحقول فارغة لتسجيل الفاتورة مدفوعة بالكامل، أو اكتب 0 لتسجيلها دينًا.</small></div>
+                  <label class="field compact purchase-payment-field is-cash"><span>كاش</span><input id="purchaseCashPaidInput" type="number" min="0" step="any" inputmode="decimal" placeholder="كامل" data-purchase-payment-method="cash" /></label>
+                  <label class="field compact purchase-payment-field is-bank"><span>تطبيق بنك</span><input id="purchaseBankPaidInput" type="number" min="0" step="any" inputmode="decimal" placeholder="0" data-purchase-payment-method="bank" /></label>
+                  <label class="field compact purchase-payment-field is-wallet"><span>محفظة</span><input id="purchaseWalletPaidInput" type="number" min="0" step="any" inputmode="decimal" placeholder="0" data-purchase-payment-method="wallet" /></label>
+                </div>
+                <label class="field purchase-note-field"><span>ملاحظة</span><textarea id="purchaseNoteInput" rows="2" placeholder="اختياري"></textarea></label>
+                <div class="purchase-final-state" aria-live="polite">
+                  <div><span>صافي الفاتورة</span><strong id="purchaseFinalNet">₪0</strong></div>
+                  <div><span>المدفوع الآن</span><strong id="purchaseFinalPaid">₪0</strong></div>
+                  <div id="purchaseFinalBalanceBox"><span id="purchaseFinalBalanceLabel">الباقي</span><strong id="purchaseFinalBalance">₪0</strong></div>
+                </div>
+                <div class="purchase-draft-actions">
+                  <button class="primary-button" id="savePurchaseInvoiceButton" type="button">تسجيل فاتورة المشتريات</button>
+                  <button class="secondary-button" id="clearPurchaseInvoiceButton" type="button">تفريغ الفاتورة</button>
+                  <button class="secondary-button" id="purchaseEditCancelButton" type="button" hidden>إلغاء التعديل</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel purchase-section-pane" id="purchaseExpensesPane" role="tabpanel" data-purchase-section-panel="expenses" hidden>
+              <div class="panel-header"><div><h2>مصاريف المحل</h2><p>الإيجار والفواتير والصيانة والتجهيزات، بعيدًا عن شراء البضاعة.</p></div></div>
+              <form class="purchase-form general-expense-form" id="generalExpenseForm">
+                <div class="section-title purchase-form-title"><h3>تسجيل مصروف</h3></div>
+                <label class="field compact">
+                  <span>التاريخ</span>
+                  <input id="generalExpenseDateInput" type="date" required />
+                </label>
+                <label class="field">
+                  <span>اسم المصروف</span>
+                  <input id="generalExpenseTitleInput" type="text" list="generalExpenseOptions" placeholder="مثال: فاتورة كهربا" required />
+                  <datalist id="generalExpenseOptions">
+                    <option value="فاتورة كهربا"></option>
+                    <option value="فاتورة مياه"></option>
+                    <option value="إنترنت"></option>
+                    <option value="إيجار محل"></option>
+                    <option value="صيانة"></option>
+                  </datalist>
+                </label>
+                <label class="field compact expense-category-field">
+                  <span>نوع المصروف</span>
+                  <select id="generalExpenseCategoryInput">
+                    <option value="operations">تشغيل وفواتير</option>
+                    <option value="rent">إيجار</option>
+                    <option value="workers">عمال</option>
+                    <option value="renovation">تجهيزات وتوسعة المشروع</option>
+                    <option value="maintenance">صيانة</option>
+                    <option value="other">أخرى</option>
+                  </select>
+                </label>
+                <fieldset class="expense-purpose-field">
+                  <legend>كيف نحسبه؟</legend>
+                  <div class="expense-purpose-toggle">
+                    <label>
+                      <input type="radio" name="generalExpensePurpose" value="operations" checked />
+                      <span>تشغيل الكافيه</span>
+                    </label>
+                    <label>
+                      <input type="radio" name="generalExpensePurpose" value="renovation" />
+                      <span>تجهيزات وتوسعة المشروع</span>
+                    </label>
+                  </div>
+                  <small>تشغيل الكافي ينقص صافي التشغيل. التجهيز والتوسعة يخرج من الصندوق لكنه يبقى منفصلًا عن ربح التشغيل.</small>
+                </fieldset>
+                <label class="field compact">
+                  <span>المبلغ</span>
+                  <input id="generalExpenseAmountInput" type="number" min="0" step="any" inputmode="decimal" placeholder="اكتب المبلغ" required />
+                </label>
+                <label class="field compact">
+                  <span>طريقة الدفع</span>
+                  <select id="generalExpenseMethodInput">
+                    <option value="cash">كاش</option>
+                    <option value="bank">تطبيق بنك</option>
+                    <option value="wallet">محفظة</option>
+                  </select>
+                </label>
+                <label class="field purchase-note-field">
+                  <span>ملاحظة</span>
+                  <textarea id="generalExpenseNoteInput" rows="2" placeholder="اختياري"></textarea>
+                </label>
+                <button class="primary-button" id="generalExpenseSubmitButton" type="submit">تسجيل المصروف</button>
+                <button class="secondary-button" id="generalExpenseCancelEditButton" type="button" hidden>إلغاء التعديل</button>
+              </form>
+              <div class="section-title expense-ledger-heading"><div><h3>سجل المصاريف</h3><small id="generalExpenseResultLabel">كل المصاريف</small></div></div>
+              <div class="expense-ledger-filters">
+                <label class="field compact"><span>نوع المصروف</span><select id="generalExpenseCategoryFilter"><option value="all">كل الأنواع</option><option value="operations">تشغيل وفواتير</option><option value="rent">إيجار</option><option value="workers">عمال</option><option value="renovation">تجهيزات وتوسعة</option><option value="maintenance">صيانة</option><option value="other">أخرى</option></select></label>
+                <label class="field compact"><span>طريقة الحساب</span><select id="generalExpensePurposeFilter"><option value="all">تشغيل وتجهيزات</option><option value="operations">تشغيل الكافي</option><option value="renovation">تجهيزات وتوسعة</option></select></label>
+                <label class="field compact"><span>طريقة الدفع</span><select id="generalExpenseMethodFilter"><option value="all">كل طرق الدفع</option><option value="cash">كاش</option><option value="bank">تطبيق بنك</option><option value="wallet">محفظة</option></select></label>
+                <button class="secondary-button" id="generalExpenseClearFiltersButton" type="button">مسح تصفية المصاريف</button>
+              </div>
+              <div class="purchase-total-box" id="generalExpenseTotalBox"></div>
+              <div class="purchase-list" id="generalExpensesList"></div>
+            </section>
+
+            <section class="panel purchase-section-pane purchase-ledger-panel" id="purchaseRecordsPane" role="tabpanel" data-purchase-section-panel="records" hidden>
+              <div class="panel-header"><div><h2>سجل فواتير البضاعة</h2><p>ابحث وراجع قيمة البضاعة والمدفوع والدين والمصاريف.</p></div></div>
+              <div class="purchase-total-box" id="purchaseTotalBox"></div>
+              <div class="purchase-list" id="purchasesList"></div>
+            </section>
+
+            <section class="panel purchase-section-pane" id="purchaseSuppliersPane" role="tabpanel" data-purchase-section-panel="suppliers" hidden>
+              <div class="panel-header"><div><h2>حسابات الموردين</h2><p>سجل دفعة أو دينًا مباشرًا، ثم افتح كشف أي مورد.</p></div></div>
+              <form class="purchase-form supplier-pay-form" id="supplierPayForm">
+                <label class="field">
+                  <span>المورّد</span>
+                  <input id="supplierPayNameInput" type="text" list="supplierNameOptions" placeholder="اسم المورّد" autocomplete="off" />
+                  <datalist id="supplierNameOptions"></datalist>
+                </label>
+                <label class="field compact">
+                  <span>نوع الحركة</span>
+                  <select id="supplierTransactionTypeInput">
+                    <option value="payment_out">تسديد لمورد</option>
+                    <option value="debt_increase">دين على الحساب</option>
+                    <option value="credit_note">رصيد عند المورد</option>
+                    <option value="receipt_in">قبض من مورد</option>
+                  </select>
+                </label>
+                <label class="field compact">
+                  <span>مبلغ الحركة</span>
+                  <input id="supplierPayAmountInput" type="number" min="0" step="any" inputmode="decimal" placeholder="₪" />
+                </label>
+                <label class="field compact">
+                  <span>طريقة الدفع</span>
+                  <select id="supplierPayMethodInput">
+                    <option value="cash">كاش</option>
+                    <option value="bank">تطبيق بنك</option>
+                    <option value="wallet">محفظة</option>
+                  </select>
+                </label>
+                <label class="field supplier-transaction-note-field">
+                  <span>ملاحظة</span>
+                  <input id="supplierTransactionNoteInput" type="text" placeholder="اختياري" />
+                </label>
+                <button class="primary-button" type="submit">تسجيل حركة المورد</button>
+                <button class="secondary-button" id="supplierTransactionCancelEditButton" type="button" hidden>إلغاء التعديل</button>
+              </form>
+              <div class="purchase-total-box" id="supplierDebtTotalBox"></div>
+              <div class="purchase-list" id="supplierDebtList"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view inventory-pane-stock" id="view-inventory" aria-labelledby="inventoryCenterTitle" data-inventory-pane="stock">
+
+          <section class="inventory-command-center panel">
+            <div class="inventory-command-head">
+              <div class="inventory-topbar-title">
+                <span class="inventory-page-kicker">وردية اليوم</span>
+                <h2 id="inventoryCenterTitle">المخزون والجرد</h2>
+                <p>تابع النواقص والمواد من جهة، واعتمد العدّ من جهة ثانية بدون خلط.</p>
+                <div class="inventory-pane-switch" role="tablist" aria-label="اختيار قسم المخزون والجرد">
+                  <button class="inventory-pane-tab is-active" type="button" role="tab" data-inventory-pane-tab="stock" aria-selected="true" aria-controls="inventoryStockPane">
+                    المخزون
+                    <span>نواقص ومواد</span>
+                  </button>
+                  <button class="inventory-pane-tab" type="button" role="tab" data-inventory-pane-tab="count" aria-selected="false" aria-controls="inventoryCountPane">
+                    الجرد
+                    <span>عدّ واعتماد</span>
+                  </button>
+                </div>
+              </div>
+              <div class="inventory-topbar-actions inventory-count-tools">
+                <button class="secondary-button" id="inventoryFillButton" type="button">مطابقة الظاهر</button>
+                <button class="secondary-button" id="inventoryPrintReportButton" type="button">تقرير الجرد</button>
+                <button class="primary-button" id="inventorySaveButton" type="button">اعتماد الجرد</button>
+              </div>
+            </div>
+
+            <div class="inventory-filter-deck">
+              <label class="field compact inventory-search-field">
+                <span>بحث</span>
+                <input id="inventorySearchInput" type="search" placeholder="اكتب اسم المادة أو الصنف" />
+              </label>
+              <label class="field compact inventory-count-filter">
+                <span>عرض</span>
+                <select id="inventoryScopeInput">
+                  <option value="purchases">مخزون المشتريات</option>
+                  <option value="sales">أصناف البيع</option>
+                  <option value="all">كل المخزون</option>
+                </select>
+              </label>
+              <label class="field compact inventory-stock-filter">
+                <span>عرض المواد</span>
+                <select id="inventoryAvailabilityInput">
+                  <option value="usable">المواد المستخدمة الآن</option>
+                  <option value="active">مواد نشتريها عادي</option>
+                  <option value="clearing">مواد للتصفية</option>
+                  <option value="stopped">مواد موقوفة</option>
+                  <option value="all">كل مواد الشراء</option>
+                </select>
+              </label>
+              <label class="field compact inventory-count-filter">
+                <span>الحالة</span>
+                <select id="inventoryStatusInput">
+                  <option value="all">كل الحالات</option>
+                  <option value="low">ناقص أو على الحد</option>
+                  <option value="empty">فارغ</option>
+                  <option value="not-counted">غير معدود</option>
+                  <option value="counted">تم عدها</option>
+                  <option value="changed">فيها فرق</option>
+                </select>
+              </label>
+              <label class="field compact inventory-note-filter inventory-count-filter">
+                <span>ملاحظة الجرد</span>
+                <input id="inventoryNoteInput" type="text" placeholder="مثال: جرد نهاية اليوم" />
+              </label>
+            </div>
+          </section>
+
+          <div class="inventory-pane-layout inventory-stock-layout is-active" id="inventoryStockPane" data-inventory-pane-panel="stock" role="tabpanel" aria-label="المخزون">
+            <div class="inventory-stock-dashboard">
+              <section class="panel low-stock-panel" id="lowStockPanel">
+                <div class="panel-header">
+                  <div>
+                    <h3>مواد ناقصة للشراء</h3>
+                    <p>المواد التي نشتريها عادي فقط تظهر في الاقتراحات</p>
+                  </div>
+                  <label class="field compact low-stock-threshold-field">
+                    <span>حد النقص</span>
+                    <input id="lowStockThresholdInput" type="number" min="0" step="1" />
+                  </label>
+                </div>
+                <div class="low-stock-list" id="lowStockList"></div>
+                <div class="purchase-suggestions-list" id="purchaseSuggestionsList"></div>
+              </section>
+
+              <section class="panel inventory-stock-panel">
+                <div class="panel-header inventory-stock-panel-header">
+                  <div>
+                    <h3>مخزون مواد الشراء</h3>
+                    <p>كمية كل مادة، قيمتها، وسعر وحدة المخزون</p>
+                  </div>
+                  <label class="field compact inventory-stock-sort-field">
+                    <span>رتّب القائمة</span>
+                    <select id="inventoryStockSortInput">
+                      <option value="risk">المواد التي تحتاج انتباه أولاً</option>
+                      <option value="value">أعلى قيمة أولاً</option>
+                      <option value="qty">أقل كمية أولاً</option>
+                      <option value="latest">الأحدث شراءً أولاً</option>
+                      <option value="name">حسب اسم المادة</option>
+                    </select>
+                  </label>
+                </div>
+                <form class="inventory-manual-card" id="inventoryManualForm" autocomplete="off">
+                  <div class="inventory-manual-head">
+                    <div>
+                      <span>مخزون موجود عندي</span>
+                      <h4>إضافة مادة موجودة عندي</h4>
+                      <p>أدخل مادة عندك بالمحل بدون إنشاء فاتورة شراء أو تغيير الصندوق.</p>
+                    </div>
+                    <button class="primary-button" type="submit">إضافة للمخزون</button>
+                  </div>
+                  <div class="inventory-manual-grid">
+                    <label class="field compact">
+                      <span>اسم المادة</span>
+                      <input id="inventoryManualNameInput" type="text" placeholder="مثال: سكر" />
+                    </label>
+                    <label class="field compact">
+                      <span>الكمية الموجودة</span>
+                      <input id="inventoryManualQtyInput" type="number" min="0" step="any" inputmode="decimal" placeholder="0" />
+                    </label>
+                    <label class="field compact">
+                      <span>وحدة المخزون</span>
+                      <input id="inventoryManualUnitInput" type="text" placeholder="كيلو، لتر، حبة..." />
+                    </label>
+                    <label class="field compact">
+                      <span>سعر وحدة المخزون</span>
+                      <input id="inventoryManualCostInput" type="number" min="0" step="any" inputmode="decimal" placeholder="0" />
+                    </label>
+                    <label class="field compact">
+                      <span>وحدة الشراء</span>
+                      <input id="inventoryManualPurchaseUnitInput" type="text" placeholder="اختياري" />
+                    </label>
+                    <label class="field compact">
+                      <span>حالة المادة</span>
+                      <select id="inventoryManualStatusInput">
+                        <option value="active">نشتريها عادي</option>
+                        <option value="clearing">للتصفية</option>
+                        <option value="stopped">موقوفة</option>
+                      </select>
+                    </label>
+                    <label class="field compact inventory-manual-note-field">
+                      <span>ملاحظة</span>
+                      <input id="inventoryManualNoteInput" type="text" placeholder="اختياري: مصدرها أو سبب الإدخال" />
+                    </label>
+                  </div>
+                </form>
+                <form class="inventory-manual-card inventory-waste-card" id="inventoryWasteForm" autocomplete="off">
+                  <div class="inventory-manual-head">
+                    <div>
+                      <span>تالف / هدر</span>
+                      <h4>تسجيل مادة تالفة</h4>
+                      <p>ينقص من المخزون فقط، ويظهر كخسارة بضاعة في التقارير بدون تغيير الصندوق.</p>
+                    </div>
+                    <button class="primary-button" type="submit">تسجيل تالف</button>
+                  </div>
+                  <div class="inventory-manual-grid">
+                    <label class="field compact inventory-waste-item-field">
+                      <span>المادة</span>
+                      <select id="inventoryWasteItemInput">
+                        <option value="">اختر مادة من المخزون</option>
+                      </select>
+                    </label>
+                    <label class="field compact">
+                      <span>الكمية التالفة</span>
+                      <input id="inventoryWasteQtyInput" type="number" min="0" step="any" inputmode="decimal" placeholder="0" />
+                    </label>
+                    <label class="field compact inventory-manual-note-field">
+                      <span>السبب</span>
+                      <input id="inventoryWasteReasonInput" type="text" placeholder="مثال: منتهي، انكسر، انكب" />
+                    </label>
+                  </div>
+                  <div class="inventory-waste-list" id="inventoryWasteList"></div>
+                </form>
+                <div class="inventory-stock-summary" id="inventoryStockSummary"></div>
+                <div class="inventory-stock-list" id="inventoryStockList"></div>
+              </section>
+
+              <section class="panel inventory-history-panel">
+                <div class="panel-header">
+                  <div>
+                    <h3>سجل الجرد</h3>
+                    <p>آخر الاعتمادات والفروقات</p>
+                  </div>
+                </div>
+                <div class="invoice-filters">
+                  <label class="field compact">
+                    <span>من تاريخ</span>
+                    <input id="inventoryHistoryDateFromInput" type="date" />
+                  </label>
+                  <label class="field compact">
+                    <span>إلى تاريخ</span>
+                    <input id="inventoryHistoryDateToInput" type="date" />
+                  </label>
+                  <button class="secondary-button" type="button" id="inventoryHistoryDateClearButton">✖ مسح التاريخ</button>
+                </div>
+                <div class="inventory-history-list" id="inventoryHistoryList"></div>
+              </section>
+            </div>
+          </div>
+
+          <div class="inventory-pane-layout inventory-count-layout" id="inventoryCountPane" data-inventory-pane-panel="count" role="tabpanel" aria-label="الجرد" hidden>
+            <div class="inventory-summary" id="inventorySummary"></div>
+            <section class="inventory-count-col panel">
+              <div class="inventory-count-header">
+                <div>
+                  <h3>قائمة العدّ</h3>
+                  <p>الكمية الفعلية، الفرق، والسبب في صف واحد ثابت.</p>
+                </div>
+              </div>
+              <div class="inventory-list" id="inventoryList"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="view-settings">
+          <div class="workspace-grid">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2 id="menuFormTitle">إضافة صنف</h2>
+                  <p>عدّل قائمة القهوة والشاي والشيشة</p>
+                </div>
+              </div>
+              <form class="menu-form" id="menuForm">
+                <label class="field">
+                  <span>اسم الصنف</span>
+                  <input id="menuNameInput" type="text" required />
+                </label>
+                <label class="field compact">
+                  <span>سعر البيع</span>
+                  <input id="menuPriceInput" type="number" min="0" step="0.5" required />
+                </label>
+                <label class="field compact">
+                  <span>سعر الشراء</span>
+                  <input id="menuCostInput" type="number" min="0" step="any" inputmode="decimal" placeholder="اختياري مع المكونات" />
+                </label>
+                <label class="field compact">
+                  <span>تشغيل للوحدة</span>
+                  <input id="menuOperatingCostInput" type="number" min="0" step="any" inputmode="decimal" placeholder="غاز، كهربا، عمال..." />
+                </label>
+                <label class="field compact">
+                  <span>نوع التشغيل</span>
+                  <select id="menuOperatingCostTypeInput">
+                    <option value="gas">غاز</option>
+                    <option value="electricity">كهربا</option>
+                    <option value="labor">عمال</option>
+                    <option value="other">أخرى</option>
+                  </select>
+                </label>
+                <label class="field compact">
+                  <span>التصنيف</span>
+                  <input id="menuCategoryInput" type="text" placeholder="مشروبات" required />
+                </label>
+                <div class="menu-components-box">
+                  <div class="section-title">
+                    <h3>مكونات الصنف من المخزون</h3>
+                    <p>اختَر أكثر من مادة وحدد كمية الاستهلاك لكل عملية بيع</p>
+                  </div>
+                  <div class="menu-component-controls">
+                    <label class="field compact">
+                      <span>صنف من المخزون</span>
+                      <select id="menuComponentItemInput"></select>
+                    </label>
+                    <label class="field compact">
+                      <span>كمية الاستهلاك</span>
+                      <input id="menuComponentQtyInput" type="number" min="0" step="any" inputmode="decimal" placeholder="مثال: 25" />
+                    </label>
+                    <button class="secondary-button" id="menuComponentAddButton" type="button">إضافة مكون</button>
+                  </div>
+                  <div class="menu-components-list" id="menuComponentsList"></div>
+                </div>
+                <div class="menu-components-box">
+                  <div class="section-title">
+                    <h3>أحجام / خيارات الصنف (اختياري)</h3>
+                    <p>مثل صغير/وسط/كبير أو إضافات — كل خيار بسعره. لما تضغط الصنف بالبيع بيطلب تختار.</p>
+                  </div>
+                  <div class="menu-component-controls">
+                    <label class="field compact">
+                      <span>اسم الخيار</span>
+                      <input id="menuOptionLabelInput" type="text" placeholder="مثال: كبير" autocomplete="off" />
+                    </label>
+                    <label class="field compact">
+                      <span>السعر</span>
+                      <input id="menuOptionPriceInput" type="number" min="0" step="any" inputmode="decimal" placeholder="₪" />
+                    </label>
+                    <button class="secondary-button" id="menuOptionAddButton" type="button">إضافة خيار</button>
+                  </div>
+                  <div class="menu-components-list" id="menuOptionsList"></div>
+                </div>
+                <div class="menu-form-actions">
+                  <button class="primary-button" id="menuSubmitButton" type="submit">إضافة الصنف</button>
+                  <button class="secondary-button" id="menuCancelEditButton" type="button" hidden>إلغاء</button>
+                </div>
+              </form>
+            </section>
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>قائمة الأصناف</h2>
+                  <p>الأسعار الحالية</p>
+                </div>
+                <div class="toolbar">
+                  <button class="secondary-button" id="menuExcelExportButton" type="button">تصدير Excel</button>
+                  <label class="secondary-button file-button">
+                    استيراد Excel
+                    <input id="menuExcelImportInput" type="file" accept=".xls,.html,text/html,application/vnd.ms-excel" />
+                  </label>
+                </div>
+              </div>
+              <div class="settings-stats-filter">
+                <label class="field compact settings-menu-search-field">
+                  <span>بحث الصنف</span>
+                  <input id="settingsMenuSearchInput" type="search" placeholder="اسم الصنف أو التصنيف" />
+                </label>
+                <label class="field compact">
+                  <span>المباعة من تاريخ</span>
+                  <input id="menuStatsDateFromInput" type="date" />
+                </label>
+                <label class="field compact">
+                  <span>المباعة إلى تاريخ</span>
+                  <input id="menuStatsDateToInput" type="date" />
+                </label>
+                <strong id="menuStatsRangeText">كل الفترات</strong>
+              </div>
+              <div class="settings-stats-summary" id="menuStatsSummary" aria-label="إجمالي مبيعات الأصناف"></div>
+              <div class="settings-menu-list" id="settingsMenuList"></div>
+            </section>
+          </div>
+
+          <section class="panel combo-manager-panel">
+            <div class="panel-header">
+              <div>
+                <h2>🎁 العروض / الكومبو</h2>
+                <p>اعمل عرض من عدة أصناف بسعر خاص — بيظهر بشاشة البيع تحت تصنيف "🎁 عروض"</p>
+              </div>
+            </div>
+            <div class="combo-form">
+              <label class="field">
+                <span>اسم العرض</span>
+                <input id="comboNameInput" type="text" placeholder="مثال: عرض الفطور" autocomplete="off" />
+              </label>
+              <label class="field compact">
+                <span>سعر العرض</span>
+                <input id="comboPriceInput" type="number" min="0" step="any" inputmode="decimal" placeholder="₪" />
+              </label>
+              <div class="combo-add-item-row">
+                <label class="field compact">
+                  <span>صنف</span>
+                  <select id="comboItemSelect"></select>
+                </label>
+                <label class="field compact">
+                  <span>الكمية</span>
+                  <input id="comboItemQtyInput" type="number" min="1" step="1" value="1" />
+                </label>
+                <button class="secondary-button" id="comboAddItemButton" type="button">➕ أضف صنف للعرض</button>
+              </div>
+              <div class="combo-draft-list" id="comboDraftList"></div>
+              <button class="primary-button" id="comboSaveButton" type="button">💾 حفظ العرض</button>
+            </div>
+            <div class="combo-list" id="comboList"></div>
+          </section>
+        </section>
+        <!-- ══════════ إغلاق فترة ══════════ -->
+        <section class="view" id="view-close">
+
+          <!-- شريط آخر إغلاق -->
+          <div class="last-close-banner" id="lastCloseBanner" hidden></div>
+
+          <!-- شريط اختيار الفترة -->
+          <div class="close-period-bar panel">
+            <div class="close-period-title">
+              <h2>إغلاق فترة</h2>
+              <p>حدّد الفترة لتسوية العمال ومراجعة الأرقام</p>
+            </div>
+            <div class="close-period-dates">
+              <label class="field compact">
+                <span>من تاريخ</span>
+                <input type="date" id="closePeriodFrom" />
+              </label>
+              <label class="field compact">
+                <span>إلى تاريخ</span>
+                <input type="date" id="closePeriodTo" />
+              </label>
+              <span class="close-period-days" id="closePeriodDays"></span>
+            </div>
+            <button class="primary-button" id="closePeriodCalcButton" type="button">احسب الفترة</button>
+          </div>
+
+          <div id="closePeriodResult" hidden>
+
+            <!-- خطوة 1: ملخص الفترة (الأهم — دايمًا ظاهرة) -->
+            <div class="close-step panel">
+              <div class="close-step-header">
+                <div class="close-step-num">1</div>
+                <div>
+                  <h3>ملخص الفترة</h3>
+                  <p>المبيعات والتكاليف والصافي</p>
+                </div>
+              </div>
+              <div id="closeSummary"></div>
+
+              <div class="close-withdraw-box">
+                <h4>💸 اسحب حصتك قبل الإغلاق</h4>
+                <p>اكتب المبلغ اللي بدك تاخذه لجيبك من أرباح الفترة — بينخصم من الصندوق.</p>
+                <div class="close-withdraw-row">
+                  <label class="field compact">
+                    <span>المبلغ</span>
+                    <input id="closeWithdrawAmount" type="number" min="0" step="any" inputmode="decimal" placeholder="0" />
+                  </label>
+                  <label class="field compact">
+                    <span>من</span>
+                    <select id="closeWithdrawMethod">
+                      <option value="cash">كاش</option>
+                      <option value="bank">تطبيق بنك</option>
+                      <option value="wallet">محفظة</option>
+                    </select>
+                  </label>
+                  <label class="field compact">
+                    <span>لأي شريك</span>
+                    <select id="closeWithdrawPartner"><option value="">— غير محدد —</option></select>
+                  </label>
+                  <button class="primary-button" id="closeWithdrawButton" type="button">💸 سحب</button>
+                </div>
+                <div id="closeWithdrawList"></div>
+              </div>
+
+              <div class="close-approve-bar">
+                <span class="close-overlap-warning" id="closeOverlapWarning" hidden>⚠️ هذه الفترة متداخلة مع إغلاق سابق</span>
+                <button class="primary-button" id="closeApproveButton" type="button">✅ اعتماد الإغلاق</button>
+              </div>
+            </div>
+
+            <!-- خطوة 2: تسوية العمال (اختياري — مطوي، افتحه لو بدك تدفع رواتب) -->
+            <details class="close-step panel close-step-collapse">
+              <summary class="close-step-header">
+                <div class="close-step-num">2</div>
+                <div>
+                  <h3>تسوية العمال (اختياري)</h3>
+                  <p id="closeWorkerSubtitle">راتب نسبي حسب أيام الفترة</p>
+                </div>
+              </summary>
+              <div class="close-step-collapse-body">
+                <button class="primary-button" id="closePayAllButton" type="button">سجّل القبضات للكل</button>
+                <div class="close-workers-table" id="closeWorkersTable"></div>
+              </div>
+            </details>
+
+            <!-- خطوة 3: الجرد (اختياري — مطوي، افتحه لو بدك تراجع الجرد) -->
+            <details class="close-step panel close-step-collapse">
+              <summary class="close-step-header">
+                <div class="close-step-num">3</div>
+                <div>
+                  <h3>مراجعة الجرد (اختياري)</h3>
+                  <p id="closeInventorySubtitle">آخر جرد مسجّل في الفترة</p>
+                </div>
+              </summary>
+              <div class="close-step-collapse-body">
+                <button class="secondary-button" id="closeGoInventoryButton" type="button">فتح صفحة الجرد</button>
+                <div id="closeInventoryInfo"></div>
+              </div>
+            </details>
+
+          </div>
+
+          <!-- سجل الإغلاقات -->
+          <div class="close-step panel">
+            <div class="close-step-header">
+              <div class="close-step-num">📜</div>
+              <div>
+                <h3>سجل الإغلاقات</h3>
+                <p>الفترات المغلقة سابقاً</p>
+              </div>
+            </div>
+            <div id="closeHistoryList"></div>
+          </div>
+        </section>
+
+        <section class="view" id="view-guide">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>📖 الدليل السريع</h2>
+                <p>كل اللي بدك تعرفه عن البرنامج وروتينك اليومي</p>
+              </div>
+            </div>
+
+            <div class="guide-name-box">
+              <label class="field">
+                <span>اسم المحل / البرنامج</span>
+                <input id="businessNameInput" type="text" placeholder="مثال: مقهى النخبة" maxlength="40" />
+              </label>
+              <button class="primary-button" id="businessNameSaveButton" type="button">💾 حفظ الاسم</button>
+            </div>
+
+            <div class="guide-pin-box">
+              <div class="guide-pin-head">
+                <strong>🔒 قفل البرنامج برمز</strong>
+                <span id="pinStatusText">القفل غير مفعّل — أي حدا بيفتح الجهاز بيشوف كل البيانات.</span>
+              </div>
+              <div class="guide-pin-row" id="pinSetBox">
+                <label class="field compact">
+                  <span>رمز جديد (4–6 أرقام)</span>
+                  <input id="pinNewInput" type="password" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="مثال: 1234" />
+                </label>
+                <label class="field compact">
+                  <span>تأكيد الرمز</span>
+                  <input id="pinConfirmInput" type="password" inputmode="numeric" maxlength="6" autocomplete="off" />
+                </label>
+                <button class="primary-button" id="pinSaveButton" type="button">🔒 تفعيل القفل</button>
+              </div>
+              <div class="guide-pin-row" id="pinClearBox" hidden>
+                <label class="field compact">
+                  <span>الرمز الحالي</span>
+                  <input id="pinCurrentInput" type="password" inputmode="numeric" maxlength="6" autocomplete="off" />
+                </label>
+                <button class="secondary-button" id="pinClearButton" type="button">إلغاء القفل</button>
+              </div>
+            </div>
+
+            <div class="guide-pin-box">
+              <div class="guide-pin-head">
+                <strong>👤 صلاحيات مدير / كاشير</strong>
+                <span>وضع الكاشير يفتح شاشة البيع فقط. ديون العملاء، الفواتير التفصيلية، الحذف، التعديل الحساس، الاستيراد والتصدير، الأسعار الخاصة، والتقارير تبقى للمدير بعد إدخال الرمز.</span>
+              </div>
+            </div>
+
+            <div class="guide-pin-box">
+              <div class="guide-pin-head">
+                <strong>🖨️ حجم الطباعة</strong>
+                <span>اختر حسب طابعتك — عادي A4 أو إيصال حراري.</span>
+              </div>
+              <div class="guide-pin-row">
+                <label class="field compact">
+                  <span>الحجم</span>
+                  <select id="printSizeSelect">
+                    <option value="a4">عادي (A4)</option>
+                    <option value="80mm">إيصال حراري 80mm</option>
+                    <option value="58mm">إيصال حراري 58mm</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div class="guide-pin-box">
+              <div class="guide-pin-head">
+                <strong>💾 نسخة احتياطية تلقائية يومية</strong>
+                <span id="autoBackupStatus">ما تم أخذ نسخة تلقائية بعد.</span>
+              </div>
+              <label class="auto-backup-row">
+                <input type="checkbox" id="autoBackupToggle" />
+                <span>نزّل نسخة احتياطية تلقائيًا أول فتح كل يوم</span>
+              </label>
+              <div class="auto-backup-time-row">
+                <label class="field compact">
+                  <span>وقت النسخة اليومية</span>
+                  <input id="autoBackupTimeInput" type="time" />
+                </label>
+              </div>
+            </div>
+
+            <div class="guide-pin-box">
+              <div class="guide-pin-head">
+                <strong>🎁 نقاط ولاء الزبائن</strong>
+                <span>الزبون بيجمع نقاط على مشترياته ويستبدلها برصيد. يظهر في صفحة العميل.</span>
+              </div>
+              <label class="auto-backup-row">
+                <input type="checkbox" id="loyaltyEnabledToggle" />
+                <span>تفعيل نظام النقاط</span>
+              </label>
+              <div class="loyalty-settings-row">
+                <label class="field compact">
+                  <span>نقطة لكل (₪)</span>
+                  <input id="loyaltyPerShekelInput" type="number" min="0.1" step="any" inputmode="decimal" />
+                </label>
+                <label class="field compact">
+                  <span>نقاط المكافأة</span>
+                  <input id="loyaltyRewardPointsInput" type="number" min="1" step="1" inputmode="numeric" />
+                </label>
+                <label class="field compact">
+                  <span>قيمة المكافأة (₪)</span>
+                  <input id="loyaltyRewardValueInput" type="number" min="0" step="any" inputmode="decimal" />
+                </label>
+              </div>
+            </div>
+
+            <div class="guide-live" id="guideLive"></div>
+            <div class="audit-log-list" id="auditLogList"></div>
+
+            <div class="guide-backup-box">
+              <div class="guide-backup-text">
+                <strong>🛡️ النسخة الاحتياطية</strong>
+                <span id="guideBackupStatus">احفظ نسخة من بياناتك كل أسبوع</span>
+              </div>
+              <div class="guide-backup-actions">
+                <button class="primary-button" id="guideShareButton" type="button">📲 إرسال النسخة (واتساب/درايف)</button>
+                <button class="secondary-button" id="guideInternalBackupButton" type="button" data-manager-only>💾 حفظ نسخة داخلية</button>
+                <button class="secondary-button" id="guideBackupButton" type="button">⬇ حفظ نسخة</button>
+                <button class="secondary-button" id="restoreLatestBackupButton" type="button">↩ استرجاع آخر نسخة داخلية</button>
+                <label class="secondary-button guide-import-label">
+                  ⬆ استيراد نسخة
+                  <input id="guideImportInput" type="file" accept=".json,application/json" hidden />
+                </label>
+              </div>
+              <div class="backup-center" id="backupCenter"></div>
+
+              <div class="folder-backup-box">
+                <div class="folder-backup-text">
+                  <strong>📁 نسخة تلقائية لمجلد (الأقوى)</strong>
+                  <span id="folderBackupStatus">اختر مجلد ليُحفظ نسخة كل يوم تلقائيًا بدون ما تتذكر.</span>
+                </div>
+                <div class="folder-backup-actions">
+                  <button class="primary-button" id="folderBackupChooseButton" type="button">📁 اختر مجلد النسخ التلقائي</button>
+                  <button class="secondary-button" id="folderBackupNowButton" type="button">💾 احفظ للمجلد الآن</button>
+                  <button class="secondary-button" id="folderBackupDisableButton" type="button" hidden>إيقاف</button>
+                </div>
+              </div>
+            </div>
+
+            <details class="guide-section" open>
+              <summary>☀️ روتينك اليومي</summary>
+              <ol class="guide-list">
+                <li>بداية اليوم: افتح البرنامج وتأكد إن <strong>الكاش اللي معك</strong> = اللي بالدرج فعلاً.</li>
+                <li>مع كل طلب: سجّله فوراً — مش آخر اليوم من الذاكرة.</li>
+                <li>آخر اليوم: اطبع <strong>🧾 تقرير اليوم</strong> (من التقارير) وقارن المجموع مع الصندوق.</li>
+              </ol>
+            </details>
+
+            <details class="guide-section">
+              <summary>🔒 ترتيب إغلاق الفترة (مهم بالترتيب)</summary>
+              <ol class="guide-list">
+                <li>روح صفحة <strong>الجرد</strong> → عدّ البضاعة → احفظ الجرد.</li>
+                <li>روح <strong>إغلاق فترة</strong> → اضغط "احسب الفترة".</li>
+                <li>راجع خسارة الجرد بالخطوة 2.</li>
+                <li>اضغط <strong>"سجّل القبضات للكل"</strong> لدفع العمال.</li>
+                <li>اسحب <strong>حصتك</strong> من صندوق السحب.</li>
+                <li>اضغط <strong>"✅ اعتماد الإغلاق"</strong> — الفترة بتتقفل وما حدا يعدّل أرقامها.</li>
+              </ol>
+            </details>
+
+            <details class="guide-section">
+              <summary>💡 شرح المصطلحات</summary>
+              <div class="guide-terms">
+                <p><strong>الصافي:</strong> اللي بضل معك بعد المشتريات والمصروفات ورواتب العمال.</p>
+                <p><strong>الكاش اللي معك:</strong> فلوسك الحقيقية الآن = رأس المال + اللي دخل − اللي طلع.</p>
+                <p><strong>صندوق اليوم:</strong> صافي الفلوس اللي دخلت اليوم فقط (مقسوم كاش/بنك/محفظة).</p>
+                <p><strong>دفعها / خصم من الراتب / مجاني:</strong> أنواع مشروب العامل — دفع كاش (يدخل الصندوق) / ينخصم من راتبه / تتحمّل التكلفة بس.</p>
+                <p><strong>عمر الدين:</strong> من إمتى العميل عليه دين — أحمر يعني فوق الشهر لازم تلاحقه.</p>
+                <p><strong>سحب حصتك:</strong> الفلوس اللي بتاخذها لجيبك من أرباح الفترة — بتنخصم من الصندوق.</p>
+              </div>
+            </details>
+
+            <details class="guide-section">
+              <summary>🛡️ النسخ الاحتياطي (لا تتجاهله!)</summary>
+              <ol class="guide-list">
+                <li>كل بياناتك على هذا الجهاز فقط — لو انمسح المتصفح راح كل شي.</li>
+                <li>كل أسبوع اضغط <strong>"⬇ تصدير نسخة الآن"</strong> من الشريط الأحمر.</li>
+                <li>احفظ الملف على جوجل درايف أو ابعثه واتساب لنفسك.</li>
+              </ol>
+            </details>
+
+            <details class="guide-section">
+              <summary>🔧 حلول للمشاكل الشائعة</summary>
+              <div class="guide-terms">
+                <p><strong>الكاش مش مطابق للدرج؟</strong> في مصروف أو سحب مش مسجّل، أو بيعة نسيتها. استخدم "⚖ جرد الصندوق" بالتقارير لتثبيت الرقم الصح.</p>
+                <p><strong>بدك تعدّل فاتورة بفترة مغلقة؟</strong> احذف الإغلاق من سجل الإغلاقات أولاً، عدّل، وبعدين أعد الإغلاق.</p>
+                <p><strong>رصيد عامل غلط؟</strong> تأكد من بداية فترته الخاصة بصفحة العمال.</p>
+              </div>
+            </details>
+          </section>
+        </section>
+
+      </main>
+    </div>
+
+    <!-- التنقل السفلي للجوال -->
+    <nav class="mobile-nav" aria-label="القوائم الرئيسية">
+      <button class="tab-button mobile-nav-btn" data-view="pos" type="button"><span class="mn-ico">🛒</span><span class="mn-lbl">البيع</span></button>
+      <button class="tab-button mobile-nav-btn" data-view="invoices" type="button"><span class="mn-ico">🧾</span><span class="mn-lbl">الفواتير</span></button>
+      <button class="tab-button mobile-nav-btn" data-view="customers" type="button"><span class="mn-ico">👤</span><span class="mn-lbl">العملاء</span></button>
+      <button class="tab-button mobile-nav-btn" data-view="reports" type="button"><span class="mn-ico">📈</span><span class="mn-lbl">التقارير</span></button>
+      <button class="mobile-nav-btn mobile-more-btn" id="mobileMoreButton" type="button"><span class="mn-ico">☰</span><span class="mn-lbl">المزيد</span></button>
+    </nav>
+
+    <!-- قائمة المزيد -->
+    <div class="mobile-more-sheet" id="mobileMoreSheet" hidden>
+      <div class="mobile-more-backdrop" id="mobileMoreBackdrop"></div>
+      <div class="mobile-more-panel">
+        <div class="mobile-more-head">
+          <h3>المزيد</h3>
+          <button class="mobile-more-close" id="mobileMoreClose" type="button" aria-label="إغلاق">✕</button>
+        </div>
+        <div class="mobile-more-grid">
+          <button class="tab-button mobile-more-item" data-view="dashboard" type="button">🏠 الرئيسية</button>
+          <button class="tab-button mobile-more-item" data-view="settings" type="button">📋 الأصناف</button>
+          <button class="tab-button mobile-more-item" data-view="purchases" type="button">📦 المشتريات</button>
+          <button class="tab-button mobile-more-item" data-view="inventory" type="button">📊 الجرد</button>
+          <button class="tab-button mobile-more-item" data-view="expenses" type="button">👷 العمال</button>
+          <button class="tab-button mobile-more-item" data-view="close" type="button">🔒 إغلاق فترة</button>
+          <button class="tab-button mobile-more-item" data-view="guide" type="button">📖 دليل</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="confirm-modal" id="confirmModal" hidden role="dialog" aria-modal="true">
+      <div class="confirm-backdrop" id="confirmBackdrop"></div>
+      <div class="confirm-panel">
+        <div class="confirm-icon" id="confirmIcon">⚠️</div>
+        <p class="confirm-message" id="confirmMessage"></p>
+        <div class="confirm-actions">
+          <button class="confirm-cancel" id="confirmCancelButton" type="button">إلغاء</button>
+          <button class="confirm-yes" id="confirmYesButton" type="button">تأكيد</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="customer-edit-modal" id="customerEditModal" hidden role="dialog" aria-modal="true" aria-labelledby="customerEditTitle">
+      <div class="customer-edit-backdrop" id="customerEditBackdrop"></div>
+      <form class="customer-edit-card" id="customerEditForm">
+        <div class="customer-edit-head">
+          <div>
+            <h3 id="customerEditTitle">تعديل العميل</h3>
+            <p id="customerEditMeta">بيانات العميل</p>
+          </div>
+          <button class="icon-button customer-edit-close" id="customerEditCloseButton" type="button" aria-label="إغلاق">×</button>
+        </div>
+        <label class="field">
+          <span>اسم العميل</span>
+          <input id="customerEditNameInput" type="text" autocomplete="off" required />
+        </label>
+        <label class="field">
+          <span>رقم الجوال</span>
+          <input id="customerEditPhoneInput" type="tel" autocomplete="off" placeholder="اختياري" />
+        </label>
+        <button class="secondary-button customer-merge-toggle" id="customerMergeToggleButton" type="button" data-manager-only>دمج مع عميل آخر</button>
+        <div class="customer-merge-box" id="customerMergeBox" hidden data-manager-only>
+          <label class="field">
+            <span>ادمج هذا العميل داخل</span>
+            <select id="customerMergeTargetInput"></select>
+          </label>
+          <small>سيتم نقل الفواتير، الطلبات المفتوحة، والأسعار الخاصة إلى العميل المختار ثم حذف البطاقة المكررة.</small>
+          <button class="secondary-button customer-merge-apply" id="customerMergeApplyButton" type="button">دمج الحسابين</button>
+        </div>
+        <div class="customer-edit-actions">
+          <button class="secondary-button" id="customerEditCancelButton" type="button">إلغاء</button>
+          <button class="primary-button" type="submit">حفظ التعديل</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="customer-edit-modal customer-reminder-modal" id="customerReminderModal" hidden role="dialog" aria-modal="true" aria-labelledby="customerReminderTitle">
+      <div class="customer-edit-backdrop" id="customerReminderBackdrop"></div>
+      <section class="customer-edit-card customer-reminder-card">
+        <div class="customer-edit-head">
+          <div>
+            <h3 id="customerReminderTitle">رسائل ديون العملاء</h3>
+            <p id="customerReminderMeta">جاهزة للمراجعة</p>
+          </div>
+          <button class="icon-button customer-edit-close" id="customerReminderCloseButton" type="button" aria-label="إغلاق">×</button>
+        </div>
+        <div class="customer-reminder-toolbar">
+          <button class="primary-button" id="customerReminderCopyButton" type="button">نسخ كل الرسائل</button>
+          <button class="secondary-button" id="customerReminderCancelButton" type="button">إغلاق</button>
+        </div>
+        <div class="customer-reminder-list" id="customerReminderList"></div>
+      </section>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <template id="printTemplate">
+      <section class="print-invoice" dir="rtl">
+        <h1>دفتر المقهى</h1>
+        <p class="print-meta"></p>
+        <div class="print-lines"></div>
+        <div class="print-total"></div>
+      </section>
+    </template>
+
+  <script src="./js/01-core.js?v=20261005-auto-personal-return-01" defer></script>
+  <script src="./js/02-domain.js?v=20261007-customer-offset-01" defer></script>
+  <script src="./js/03-pos.js?v=20261017-dashboard-01" defer></script>
+  <script src="./js/04-customers-invoices.js?v=20261007-customer-offset-01" defer></script>
+  <script src="./js/05-workers.js?v=20261005-auto-personal-total-01" defer></script>
+  <script src="./js/06-inventory-menu.js?v=20260926-inventory-info-01" defer></script>
+  <script src="./js/07-reports.js?v=20261007-customer-offset-01" defer></script>
+  <script src="./js/08-checkout.js?v=20260824-01" defer></script>
+  <script src="./js/09-actions.js?v=20261008-purchase-unit-price-01" defer></script>
+  <script src="./js/10-close.js?v=20261004-personal-withdrawal-return-01" defer></script>
+  <script src="./js/11-extras.js?v=20260926-inventory-info-01" defer></script>
+  <script src="./js/12-init.js?v=20261008-purchase-unit-price-01" defer></script>
+  </body>
+</html>

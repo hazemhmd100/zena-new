@@ -1,0 +1,12 @@
+{
+  "name": "دفتر المقهى",
+  "short_name": "دفتر المقهى",
+  "description": "نظام طاولات وفواتير وحسابات عملاء للمقهى.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "dir": "rtl",
+  "lang": "ar",
+  "background_color": "#f4f7f6",
+  "theme_color": "#0f8b8d",
+  "icons": []
+}
