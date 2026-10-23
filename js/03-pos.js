@@ -5,7 +5,9 @@ const FAVORITES_CATEGORY = "⭐ المفضلة";
 const COMBOS_CATEGORY = "🎁 عروض";
 
 function renderComboCards() {
-  const combos = state.combos || [];
+  const combos = (state.combos || []).filter((combo) => (combo.items || []).every((ci) => {
+    return menuItemIsSaleVisible((state.menu || []).find((item) => item.id === ci.menuItemId));
+  }));
   if (!combos.length) return '<div class="empty-state">لا توجد عروض. أضفها من صفحة الأصناف.</div>';
   return combos.map((combo) => {
     const itemsText = (combo.items || []).map((ci) => {
@@ -27,6 +29,7 @@ function render() {
   renderTabs();
   renderActiveView();
   renderBackupReminder();
+  renderWorkspaceSwitcher();
   applyBusinessName();
   applyAppTheme();
   rememberUiLocation();
@@ -108,6 +111,7 @@ function switchView(view) {
   renderTabs();
   renderActiveView();
   renderBackupReminder();
+  renderWorkspaceSwitcher();
   applyBusinessName();
   applyAppTheme();
   if (view === "pos") focusMenuSearchSoon();
@@ -577,10 +581,14 @@ function renderPosCustomerAccountCard(order = getOpenOrder(), customer = getCust
 
 function renderOrder() {
   const order = getOpenOrder();
+  if (!order.items.length && state.lastPosSaleDate) order.saleDate = state.lastPosSaleDate;
   const customer = getCustomer(order.customerId);
   const tableLabel = getTableLabel();
   const payment = getOrderPayment(order);
   const hasOrder = Boolean(order.items.length);
+
+  const saleDateInput = document.getElementById("posSaleDateInput");
+  if (saleDateInput) saleDateInput.value = order.saleDate || todayDateInputValue();
 
   els.orderSubtitle.textContent = `رقم الطاولة ${state.selectedTable}`;
   els.tableNameInput.value = tableLabel;
@@ -695,6 +703,7 @@ function getQuickSaleItems(limit = 6) {
   if (!Array.isArray(state.menu) || !state.menu.length) return [];
   const scores = quickSaleScoresByItemId();
   return state.menu
+    .filter((item) => menuItemIsSaleVisible(item))
     .map((item, index) => ({ item, index, score: scores.get(item.id) || 0 }))
     .sort((a, b) => (b.score - a.score) || (a.index - b.index))
     .slice(0, limit)
@@ -761,9 +770,12 @@ function focusMenuSearchSoon(force = false) {
 
 function renderMenu() {
   if (typeof closeItemOptionPicker === "function") closeItemOptionPicker();
-  const hasFavorites = state.menu.some((item) => item.favorite);
-  const hasCombos = (state.combos || []).length > 0;
-  const categories = [...(hasCombos ? [COMBOS_CATEGORY] : []), ...(hasFavorites ? [FAVORITES_CATEGORY] : []), "الكل", ...new Set(state.menu.map((item) => item.category))];
+  const saleMenu = state.menu.filter((item) => menuItemIsSaleVisible(item));
+  const hasFavorites = saleMenu.some((item) => item.favorite);
+  const hasCombos = (state.combos || []).some((combo) => (combo.items || []).every((ci) => {
+    return menuItemIsSaleVisible(state.menu.find((item) => item.id === ci.menuItemId));
+  }));
+  const categories = [...(hasCombos ? [COMBOS_CATEGORY] : []), ...(hasFavorites ? [FAVORITES_CATEGORY] : []), "الكل", ...new Set(saleMenu.map((item) => item.category))];
   if (!categories.includes(selectedCategory)) selectedCategory = "الكل";
 
   renderQuickMenuItems();
@@ -772,13 +784,20 @@ function renderMenu() {
     <button class="category-button ${category === selectedCategory ? "is-active" : ""}" type="button" data-category="${escapeAttr(category)}">${escapeHtml(category)}</button>
   `).join("");
 
+  const sortButton = document.getElementById("posMenuSortButton");
+  if (sortButton) {
+    sortButton.textContent = posMenuSortMode ? "حفظ وإنهاء الترتيب" : "ترتيب الأصناف";
+    sortButton.classList.toggle("is-active", posMenuSortMode);
+  }
+  els.menuGrid.classList.toggle("is-sorting", posMenuSortMode);
+
   if (selectedCategory === COMBOS_CATEGORY) {
     els.menuGrid.innerHTML = renderComboCards();
     return;
   }
 
   const query = els.menuSearchInput.value.trim().toLowerCase();
-  const items = state.menu.filter((item) => {
+  const items = saleMenu.filter((item) => {
     const matchesCategory = selectedCategory === FAVORITES_CATEGORY
       ? item.favorite
       : (selectedCategory === "الكل" || item.category === selectedCategory);
@@ -804,7 +823,8 @@ function renderMenu() {
         ? (preferredOption ? preferredOption.label : "عادي")
         : "اختيار";
       return `
-        <article class="menu-item ${hasCustom ? "has-custom-price" : ""} ${options.length ? "has-options" : ""} ${hasPreferredOption ? "has-preferred-option" : ""}" role="button" tabindex="0" data-menu-item="${escapeAttr(item.id)}" ${options.length ? 'aria-haspopup="menu" aria-expanded="false"' : ""}>
+        <article class="menu-item ${hasCustom ? "has-custom-price" : ""} ${options.length ? "has-options" : ""} ${hasPreferredOption ? "has-preferred-option" : ""}" role="button" tabindex="0" data-menu-item="${escapeAttr(item.id)}" ${posMenuSortMode ? 'draggable="true"' : ""} ${options.length ? 'aria-haspopup="menu" aria-expanded="false"' : ""}>
+          ${posMenuSortMode ? '<span class="pos-menu-drag-handle" aria-hidden="true">اسحب</span><div class="pos-menu-sort-actions"><button type="button" data-pos-menu-move="up" title="تحريك للأعلى">↑</button><button type="button" data-pos-menu-move="down" title="تحريك للأسفل">↓</button></div>' : ""}
           ${item.favorite ? '<span class="menu-fav-star" aria-hidden="true">⭐</span>' : ""}
           <strong>${escapeHtml(item.name)}</strong>
           ${hasCustom
@@ -819,6 +839,26 @@ function renderMenu() {
     : '<div class="empty-state">لا توجد أصناف مطابقة.</div>';
 }
 
+function togglePosMenuSortMode() {
+  posMenuSortMode = !posMenuSortMode;
+  posDraggedMenuId = null;
+  renderMenu();
+  showToast(posMenuSortMode ? "اسحب الأصناف أو استخدم الأسهم لترتيبها." : "تم حفظ ترتيب الأصناف.");
+}
+
+function movePosMenuItem(itemId, direction) {
+  const from = state.menu.findIndex((item) => item.id === itemId);
+  if (from < 0) return;
+  const visibleIds = Array.from(els.menuGrid.querySelectorAll("[data-menu-item]")).map((card) => card.dataset.menuItem);
+  const visibleIndex = visibleIds.indexOf(itemId);
+  const targetId = visibleIds[visibleIndex + (direction === "up" ? -1 : 1)];
+  const target = state.menu.findIndex((item) => item.id === targetId);
+  if (visibleIndex < 0 || target < 0) return;
+  [state.menu[from], state.menu[target]] = [state.menu[target], state.menu[from]];
+  saveState();
+  renderMenu();
+}
+
 function renderPurchaseItemSelect() {
   if (!ENABLE_LINKING) {
     els.purchaseMenuItemInput.value = "";
@@ -831,10 +871,11 @@ function renderPurchaseItemSelect() {
   els.purchaseMenuItemInput.value = state.menu.some((item) => item.id === selected) ? selected : "";
 }
 
-function purchaseComponentOptions(ownerId = "") {
+function purchaseComponentOptions(ownerId = "", useSearch = true) {
   if (!ENABLE_STOCK_COMPONENTS) return [];
+  const query = useSearch ? String(els.menuComponentSearchInput?.value || "").trim().toLowerCase() : "";
   return purchaseInventoryItems()
-    .filter((item) => purchaseInventoryItemDefaultVisible(item))
+    .filter((item) => !query || searchMatch(`${item.name || ""} ${item.originalName || ""} ${item.stockUnit || ""}`, query))
     .map((item) => ({
     itemId: item.id,
     purchaseItemName: item.name,
@@ -842,7 +883,7 @@ function purchaseComponentOptions(ownerId = "") {
     unit: item.stockUnit || "",
     disabled: false,
     value: JSON.stringify({ itemId: item.id, purchaseItemName: item.name, unit: item.stockUnit || "" }),
-    label: `${item.name}${item.stockUnit ? ` - ${item.stockUnit}` : ""} | المتوفر: ${quantityWithUnit(item.stockQty, item.stockUnit)} | آخر سعر: ${money(stockItemRecipeUnitCost(item))}`
+    label: `${item.name}${item.stockUnit ? ` - ${item.stockUnit}` : ""} | المتوفر: ${quantityWithUnit(item.stockQty, item.stockUnit)} | آخر سعر: ${money(stockItemRecipeUnitCost(item))}${item.hidden ? " | محذوف من العرض" : normalizePurchaseInventoryStatus(item.availabilityStatus) !== "active" ? ` | ${purchaseInventoryStatusLabel(item.availabilityStatus)}` : ""}`
   })).sort((a, b) => {
     return a.label.localeCompare(b.label, "ar");
   });
@@ -946,6 +987,7 @@ function addMenuComponent() {
   else menuComponentDraft.push({ id: uid("component"), itemId, purchaseItemName, qty, unit });
 
   els.menuComponentItemInput.value = "";
+  if (els.menuComponentSearchInput) els.menuComponentSearchInput.value = "";
   els.menuComponentQtyInput.value = "";
   renderMenuComponentsEditor();
 }
@@ -955,14 +997,89 @@ function renderMenuOptionsEditor() {
   const listEl = document.getElementById("menuOptionsList");
   if (!listEl) return;
   menuOptionsDraft = normalizeMenuOptions(menuOptionsDraft);
+  const componentChoices = purchaseComponentOptions(editingMenuItemId || "", false);
   listEl.innerHTML = menuOptionsDraft.length
-    ? menuOptionsDraft.map((opt) => `
-        <article class="menu-component-line">
-          <div><strong>${escapeHtml(opt.label)}</strong></div>
-          <span>${money(opt.price)}</span>
-          <button type="button" data-remove-option="${opt.id}">حذف</button>
-        </article>`).join("")
+    ? menuOptionsDraft.map((opt) => {
+      const custom = opt.componentMode === "custom";
+      const components = normalizeMenuComponents(opt.components || [], editingMenuItemId || "");
+      const inheritedComponents = normalizeMenuComponents(menuComponentDraft, editingMenuItemId || "");
+      const costInput = Number(els.menuCostInput?.value || 0);
+      const operatingCost = Math.max(Number(els.menuOperatingCostInput?.value || 0), 0);
+      const componentCost = (custom ? components : inheritedComponents).reduce((sum, component) => {
+        return sum + stockItemRecipeUnitCost(inventoryItemById(component.itemId)) * Number(component.qty || 0);
+      }, 0);
+      const optionOperatingCost = opt.includeOperatingCost === false ? 0 : operatingCost;
+      const optionCost = (custom || inheritedComponents.length ? componentCost : Math.max(costInput, 0)) + optionOperatingCost;
+      const optionProfit = Number(opt.price || 0) - optionCost;
+      return `
+        <article class="menu-option-line">
+          <div class="menu-option-head">
+            <div><strong>${escapeHtml(opt.label)}</strong><small>${custom ? (components.length ? `${components.length} مكونات خاصة` : "بدون مكونات مخزون") : "يستخدم مكونات الصنف الأساسية"}</small></div>
+            <button type="button" data-remove-option="${opt.id}">حذف الخيار</button>
+          </div>
+          <div class="menu-option-summary">
+            <div><small>سعر البيع</small><strong>${money(opt.price)}</strong></div>
+            <div><small>تكلفة الخيار</small><strong>${money(optionCost)}</strong></div>
+            <div class="${optionProfit < 0 ? "is-negative" : ""}"><small>الربح المتوقع</small><strong>${money(optionProfit)}</strong></div>
+          </div>
+          <label class="field compact menu-option-mode">
+            <span>طريقة خصم المخزون</span>
+            <select data-option-component-mode="${opt.id}">
+              <option value="inherit"${custom ? "" : " selected"}>نفس مكونات الصنف</option>
+              <option value="custom"${custom ? " selected" : ""}>مكونات خاصة لهذا الخيار</option>
+            </select>
+          </label>
+          <label class="menu-option-operating-toggle">
+            <input type="checkbox" data-option-operating-cost="${opt.id}"${opt.includeOperatingCost === false ? "" : " checked"} />
+            <span>احتساب تكلفة التشغيل لهذا الخيار${operatingCost > 0 ? ` (${money(operatingCost)})` : ""}</span>
+          </label>
+          ${custom ? `
+            <div class="menu-option-components">
+              ${components.length ? components.map((component) => {
+                const stockItem = inventoryItemById(component.itemId);
+                const unit = component.unit || itemUnit(stockItem);
+                const unitCost = stockItemRecipeUnitCost(stockItem);
+                return `
+                  <div class="menu-component-line menu-option-component">
+                    <div>
+                      <strong>${escapeHtml(stockItem?.name || component.purchaseItemName || "مكون غير موجود")}</strong>
+                      <small>${stockItem ? `من المخزون: ${escapeHtml(stockItem.name)} | ` : ""}كمية الاستهلاك لكل بيع: ${quantityWithUnit(component.qty, unit)} | آخر سعر للوحدة: ${stockItem ? money(unitCost) : "-"}</small>
+                    </div>
+                    <span>${stockItem ? money(unitCost * Number(component.qty || 0)) : "-"}</span>
+                    <button type="button" data-remove-option-component="${opt.id}" data-component-id="${component.id}">حذف</button>
+                  </div>`;
+              }).join("") : '<div class="empty-state">لا توجد مكونات: هذا الخيار لن يخصم مكونات الصنف الأساسي.</div>'}
+              <div class="menu-option-component-add">
+                <select data-option-component-item="${opt.id}">
+                  <option value="">اختر مادة من المخزون</option>
+                  ${componentChoices.map((choice) => `<option value="${escapeAttr(choice.value)}">${escapeHtml(choice.label)}</option>`).join("")}
+                </select>
+                <input type="number" min="0" step="any" inputmode="decimal" placeholder="كمية لكل بيع" data-option-component-qty="${opt.id}" />
+                <button class="secondary-button" type="button" data-add-option-component="${opt.id}">إضافة مكون</button>
+              </div>
+            </div>` : ""}
+        </article>`;
+    }).join("")
     : '<div class="empty-state">لا توجد خيارات. أضف أحجام (صغير/وسط/كبير) أو إضافات بسعر كل واحد.</div>';
+}
+
+function addMenuOptionComponent(optionId) {
+  const option = menuOptionsDraft.find((entry) => entry.id === optionId);
+  const listEl = document.getElementById("menuOptionsList");
+  const itemSelect = listEl?.querySelector(`[data-option-component-item="${CSS.escape(optionId)}"]`);
+  const qtyInput = listEl?.querySelector(`[data-option-component-qty="${CSS.escape(optionId)}"]`);
+  const selected = parsePurchaseComponentOption(itemSelect?.value || "");
+  const qty = Number(qtyInput?.value || 0);
+  if (!option || !selected?.itemId || qty <= 0) {
+    showToast("اختر مادة واكتب كمية الاستهلاك لكل بيع.");
+    return;
+  }
+  option.componentMode = "custom";
+  option.components = normalizeMenuComponents(option.components || [], editingMenuItemId || "");
+  const existing = option.components.find((component) => component.itemId === selected.itemId);
+  if (existing) existing.qty += qty;
+  else option.components.push({ id: uid("component"), ...selected, qty });
+  renderMenuOptionsEditor();
 }
 
 function addMenuOption() {
@@ -971,7 +1088,7 @@ function addMenuOption() {
   const label = (labelEl?.value || "").trim();
   const price = Number(priceEl?.value || 0);
   if (!label || price <= 0) { showToast("اكتب اسم الخيار وسعره."); return; }
-  menuOptionsDraft.push({ id: uid("opt"), label, price });
+  menuOptionsDraft.push({ id: uid("opt"), label, price, includeOperatingCost: true });
   if (labelEl) labelEl.value = "";
   if (priceEl) priceEl.value = "";
   renderMenuOptionsEditor();

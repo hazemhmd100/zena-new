@@ -835,7 +835,7 @@ async function updateReportingStart(localTime) {
   const button = document.querySelector("#reportingStartButton");
   if (button) button.disabled = true;
   try {
-    const payload = backupPayload();
+    const payload = await backupPayload();
     const fileName = `before-new-period-${backupFileName()}`;
     const saved = await saveBackupToLocalServer(payload, fileName);
     if (!saved) {
@@ -1316,17 +1316,36 @@ function renderReports() {
   renderCashLedger(range);
   renderPartnersPanel(range);
 
-  els.reportItemsList.innerHTML = soldItemRows.length
+  const soldItemsHtml = soldItemRows.length
     ? soldItemRows.map(({ item, stats, workerStats }) => `
       <article class="report-row">
         <div>
           <strong>${escapeHtml(item.name)}</strong>
-          <small>${escapeHtml(item.category)} | المباعة: ${quantityText(stats.qty)} | مبيعاتها: ${money(stats.sales)}${workerStats.qty > 0 ? ` | استهلاك عمال: ${quantityText(workerStats.qty)}` : ""}</small>
+          <small>${escapeHtml(item.category)} | سعر المنتج: ${money(item.price || 0)}${Array.isArray(item.options) && item.options.length ? " (السعر الأساسي)" : ""} | المباعة: ${quantityText(stats.qty)} | مبيعاتها: ${money(stats.sales)}${workerStats.qty > 0 ? ` | استهلاك عمال: ${quantityText(workerStats.qty)}` : ""}</small>
         </div>
         <span>ربح ${money(stats.profit)}</span>
       </article>
     `).join("")
     : '<div class="empty-state">لا توجد أصناف مباعة ضمن الفترة.</div>';
+  els.reportItemsList.innerHTML = `
+    ${soldItemsHtml}
+    <div class="report-sold-items-totals">
+      <article>
+        <span>إجمالي البيع</span>
+        <strong>${money(data.salesTotal || 0)}</strong>
+        <small>يشمل البيع المدفوع والبيع بالدين</small>
+      </article>
+      <article class="is-cost">
+        <span>تكلفة الأصناف</span>
+        <strong>${money(data.itemCost || 0)}</strong>
+        <small>تكلفة الكميات المباعة ضمن الفترة</small>
+      </article>
+      <article>
+        <span>إجمالي الربح</span>
+        <strong>${money(data.itemProfit || 0)}</strong>
+        <small>إجمالي البيع ناقص تكلفة الأصناف</small>
+      </article>
+    </div>`;
 
   els.reportCustomersList.innerHTML = customerRows.length
     ? customerRows.map((customer) => `

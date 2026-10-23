@@ -517,7 +517,7 @@ function adjustPurchaseInventoryStock(itemId, qtyDelta) {
   const item = inventoryItemById(itemId);
   if (!item) return null;
 
-  const nextQty = Number(item.stockQty || 0) + Number(qtyDelta || 0);
+  const nextQty = Math.max(Number(item.stockQty || 0) + Number(qtyDelta || 0), 0);
   state.purchaseInventoryAdjustments = state.purchaseInventoryAdjustments || {};
   state.purchaseInventoryAdjustments[item.purchaseKey] = {
     actualQty: nextQty,
@@ -719,6 +719,12 @@ function purchaseInventoryPackageBadges(item = {}) {
 }
 
 function currentStockQty(item) {
+  if (item?.inventorySource !== "purchase" && menuItemComponents(item).length) {
+    if (item.finishedStockQty !== undefined && item.finishedStockQty !== null && item.finishedStockQty !== "") {
+      return Number(item.finishedStockQty || 0);
+    }
+    return Number(menuItemDisplayStock(item).qty || 0);
+  }
   return isStockTracked(item) ? Number(item.stockQty || 0) : 0;
 }
 
@@ -769,7 +775,7 @@ function inventoryItemsForView() {
   const status = els.inventoryStatusInput?.value || "all";
   const availability = els.inventoryAvailabilityInput?.value || "usable";
   const purchaseItems = purchaseInventoryItems();
-  const menuItems = state.menu.filter((item) => isStockTracked(item));
+  const menuItems = state.menu.slice();
   const items = scope === "sales" ? menuItems : scope === "all" ? purchaseItems.concat(menuItems) : purchaseItems;
 
   return items
@@ -905,21 +911,18 @@ function renderInventoryStockPanel() {
   els.inventoryStockSummary.innerHTML = `
     <article class="inventory-stock-summary-main">
       <div>
-        <span>${availabilityLabel}</span>
+        <span>قيمة المخزون الظاهر</span>
         <strong>${money(totalValue)}</strong>
-        <small>قيمة الكمية الموجودة من المواد الظاهرة - ${quantityText(items.length)} مادة</small>
+        <small>${availabilityLabel} - ${quantityText(items.length)} مادة</small>
       </div>
       <div class="inventory-stock-health is-${health.tone}">
         <b>${health.title}</b>
         <small>${health.text}</small>
       </div>
     </article>
-    <article><span>مواد نشتريها عادي</span><strong>${quantityText(activeCount)}</strong><small>هذه تدخل في اقتراحات الطلبية</small></article>
-    <article><span>عجز / خلصت / قليلة</span><strong>${quantityText(shortageCount)} / ${quantityText(emptyCount)} / ${quantityText(lowCount)}</strong><small>مواد تحتاج انتباه حسب حد النقص</small></article>
-    <article><span>للتصفية / موقوفة</span><strong>${quantityText(clearingCount)} / ${quantityText(stoppedCount)}</strong><small>مواد لا تريد شراءها الآن</small></article>
-    <article><span>آخر إدخال / شراء</span><strong>${latestDate ? formatDate(latestDate).slice(0, 10) : "-"}</strong><small>${latestItem ? escapeHtml(latestItem.name || "") : "لا يوجد إدخال مسجل"}</small></article>
-    <article><span>عدد مرات الشراء أو الإدخال</span><strong>${quantityText(totalLines)}</strong><small>كم مرة ظهرت المواد في فواتير الشراء أو أُدخلت يدويًا</small></article>
-    <div class="inventory-stock-note">القائمة مرتبة حسب: ${escapeHtml(sortLabel)}. المواد الموقوفة أو مواد التصفية لا تدخل في اقتراحات الطلبية.</div>
+    <article class="inventory-kpi-alert"><span>تحتاج انتباه</span><strong>${quantityText(shortageCount + emptyCount + lowCount)}</strong><small>عجز ${quantityText(shortageCount)} | فارغ ${quantityText(emptyCount)} | قليل ${quantityText(lowCount)}</small></article>
+    <article><span>مواد نشطة</span><strong>${quantityText(activeCount)}</strong><small>تدخل في اقتراحات الشراء</small></article>
+    <article><span>تصفية أو موقوف</span><strong>${quantityText(clearingCount + stoppedCount)}</strong><small>لا تدخل في اقتراحات الشراء</small></article>
   `;
 
   els.inventoryStockList.innerHTML = items.length
@@ -968,18 +971,21 @@ function renderInventoryStockPanel() {
             <span><small>الكمية الموجودة</small><strong>${quantityWithUnit(item.stockQty, item.stockUnit)}</strong></span>
             <span><small>قيمة الكمية الموجودة</small><strong>${money(value)}</strong></span>
             <span class="inventory-last-price"><small>آخر سعر شراء</small><strong>${lastUnitCostText}</strong></span>
-            <span><small>متوسط التكلفة</small><strong>${averageUnitCostText}</strong></span>
-            <span><small>آخر إدخال / شراء</small><strong>${lastPurchaseText}</strong></span>
           </div>
-          <div class="inventory-stock-row-meta">
-            <span>شراء/إدخال: ${quantityText(Number(item.lineCount || 0) + Number(item.manualCount || 0))}</span>
-            <span>إجمالي الكمية المسجلة: ${quantityWithUnit(item.purchasedQty || 0, item.stockUnit)}</span>
-            ${item.isRenamed ? `<span>الاسم الأصلي: ${escapeHtml(item.originalName || "")}</span>` : ""}
-            ${Number(item.manualQty || 0) ? `<span>مدخل يدويًا: ${quantityWithUnit(item.manualQty || 0, item.stockUnit)}</span>` : ""}
-            ${item.manualNotes?.length ? `<span>ملاحظة: ${escapeHtml(item.manualNotes[0])}</span>` : ""}
-            ${packageInline ? `<span>${escapeHtml(packageInline)}</span>` : ""}
-          </div>
-          ${packageBadges}
+          <details class="inventory-row-details">
+            <summary>عرض تفاصيل المادة</summary>
+            <div class="inventory-stock-row-meta">
+              <span>متوسط التكلفة: ${averageUnitCostText}</span>
+              <span>آخر إدخال / شراء: ${lastPurchaseText}</span>
+              <span>شراء/إدخال: ${quantityText(Number(item.lineCount || 0) + Number(item.manualCount || 0))}</span>
+              <span>إجمالي الكمية المسجلة: ${quantityWithUnit(item.purchasedQty || 0, item.stockUnit)}</span>
+              ${item.isRenamed ? `<span>الاسم الأصلي: ${escapeHtml(item.originalName || "")}</span>` : ""}
+              ${Number(item.manualQty || 0) ? `<span>مدخل يدويًا: ${quantityWithUnit(item.manualQty || 0, item.stockUnit)}</span>` : ""}
+              ${item.manualNotes?.length ? `<span>ملاحظة: ${escapeHtml(item.manualNotes[0])}</span>` : ""}
+              ${packageInline ? `<span>${escapeHtml(packageInline)}</span>` : ""}
+            </div>
+            ${packageBadges}
+          </details>
         </article>
       `;
     }).join("")}
@@ -989,6 +995,9 @@ function renderInventoryStockPanel() {
 
 function renderInventory() {
   syncInventoryPaneUi();
+  document.querySelectorAll("[data-inventory-scope-quick]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.inventoryScopeQuick === els.inventoryScopeInput.value);
+  });
   renderInventoryStockPanel();
   const items = inventoryItemsForView();
   els.inventoryList.innerHTML = items.length
@@ -1030,6 +1039,8 @@ function renderInventory() {
                   ${purchaseInventoryStatusBadge(item)}
                   ${purchaseInventoryHiddenChip(item)}
                   ${purchaseInventoryAliasChip(item)}
+                  ${item.inventorySource !== "purchase" && !isStockTracked(item) && !menuItemComponents(item).length ? '<span class="inventory-new-count-chip">جرد أول مرة</span>' : ""}
+                  ${item.inventorySource !== "purchase" && menuItemComponents(item).length ? `<span class="inventory-components-count-chip">${item.finishedStockQty !== undefined ? "جرد فعلي مستقل" : "محسوب من المكونات"}</span>` : ""}
                   ${inventoryStockStateBadge(itemState)}
                   ${purchaseInventoryManualChip(item)}
                   <span class="inventory-status" data-inventory-diff="${escapeAttr(item.id)}">-</span>
@@ -1285,7 +1296,8 @@ async function saveInventoryCount() {
 
     const item = findMenuItem(line.menuItemId);
     if (item) {
-      item.stockQty = line.actualQty;
+      if (menuItemComponents(item).length) item.finishedStockQty = line.actualQty;
+      else item.stockQty = line.actualQty;
       item.updatedAt = new Date().toISOString();
     }
   });
@@ -1641,11 +1653,17 @@ function renderSettingsMenu() {
     const totalCostValue = menuItemRecipeCost(item);
     const operatingText = operatingCostText(item);
     const stock = menuItemDisplayStock(item);
+    const lastPurchase = menuItemLastPurchaseInfo(item);
     return `
-      <article class="settings-row ${editingMenuItemId === item.id ? "is-editing" : ""}" data-menu-id="${item.id}" draggable="true">
+      <article class="settings-row ${editingMenuItemId === item.id ? "is-editing" : ""} ${menuItemIsSaleVisible(item) ? "" : "is-sale-hidden"}" data-menu-id="${item.id}" draggable="true">
         <div>
-          <strong><span class="settings-drag-handle" title="اسحب لإعادة الترتيب" aria-hidden="true">⠿</span> ${escapeHtml(item.name)}</strong>
+          <strong><span class="settings-drag-handle" title="اسحب لإعادة الترتيب" aria-hidden="true">⠿</span> ${escapeHtml(item.name)} ${menuItemIsSaleVisible(item) ? "" : '<span class="settings-sale-hidden-badge">مخفي من البيع</span>'}</strong>
           <small>${escapeHtml(item.category)} | بيع: ${money(item.price)} | ${costLabel}: ${item.cost === undefined && !components.length ? "غير محدد" : money(baseCostValue)}${operatingText ? ` | تشغيل ${escapeHtml(operatingText)}` : ""} | التكلفة المعتمدة: ${money(totalCostValue)} | المخزون: ${escapeHtml(stock.text)}</small>
+          <div class="settings-last-purchase ${lastPurchase ? "" : "is-empty"}">
+            <span>آخر سعر شراء للوحدة</span>
+            <strong>${lastPurchase ? `${money(lastPurchase.unitCost)}${lastPurchase.unit ? ` / ${escapeHtml(lastPurchase.unit)}` : ""}` : "غير مسجل"}</strong>
+            <small>${lastPurchase?.source === "manual" ? "مدخل يدويًا" : lastPurchase?.createdAt ? formatDate(lastPurchase.createdAt).slice(0, 10) : "اربط الصنف عند تسجيل فاتورة الشراء"}</small>
+          </div>
           ${menuComponentsSummary(item)}
           <div class="settings-profit-row">
             <span>إجمالي الكمية المباعة: ${quantityText(profitStats.qty)}</span>
@@ -1657,6 +1675,7 @@ function renderSettingsMenu() {
           <button class="settings-fav-button ${item.favorite ? "is-fav" : ""}" type="button" data-toggle-favorite="${item.id}" title="${item.favorite ? "إزالة من المفضلة" : "إضافة للمفضلة"}" aria-label="مفضلة">${item.favorite ? "⭐" : "☆"}</button>
           <button class="settings-move-button" type="button" data-move-menu-up="${item.id}" title="تحريك لأعلى" aria-label="تحريك لأعلى">↑</button>
           <button class="settings-move-button" type="button" data-move-menu-down="${item.id}" title="تحريك لأسفل" aria-label="تحريك لأسفل">↓</button>
+          <button class="settings-visibility-button ${menuItemIsSaleVisible(item) ? "" : "is-hidden"}" type="button" data-toggle-menu-visibility="${item.id}">${menuItemIsSaleVisible(item) ? "إخفاء من البيع" : "إظهار في البيع"}</button>
           <button class="settings-edit-button" type="button" data-edit-menu="${item.id}">تعديل</button>
           <button class="settings-delete-button" type="button" data-remove-menu="${item.id}">حذف</button>
         </div>
@@ -1664,6 +1683,37 @@ function renderSettingsMenu() {
     `;
   }).join("") : '<div class="empty-state">لا توجد أصناف مطابقة للبحث.</div>';
   renderCombosSettings();
+}
+
+function menuItemLastPurchaseInfo(item) {
+  if (!item) return null;
+  const itemName = String(item.name || "").trim().toLowerCase();
+  let latest = null;
+  (state.purchases || []).forEach((purchase) => {
+    purchaseLines(purchase).forEach((line) => {
+      const linkedById = line.menuItemId && line.menuItemId === item.id;
+      const legacyName = String(line.linkedItemName || line.item || "").trim().toLowerCase();
+      const linkedByName = !line.menuItemId && itemName && legacyName === itemName;
+      if (!linkedById && !linkedByName) return;
+      const unitCost = Number(purchaseLineUnitCost(line) || 0);
+      if (unitCost <= 0) return;
+      const createdAt = purchase.createdAt || "";
+      if (latest && new Date(latest.createdAt || 0) > new Date(createdAt || 0)) return;
+      latest = {
+        unitCost,
+        unit: purchaseLineStockUnit(line) || itemUnit(item),
+        createdAt
+      };
+    });
+  });
+  if (latest) return latest;
+  const manualUnitCost = Number(item.manualLastUnitCost || 0);
+  return manualUnitCost > 0 ? {
+    unitCost: manualUnitCost,
+    unit: itemUnit(item),
+    createdAt: item.updatedAt || item.createdAt || "",
+    source: "manual"
+  } : null;
 }
 
 // ─── إدارة العروض / الكومبو ─────────────────────────────────────
@@ -1790,6 +1840,19 @@ function toggleMenuFavorite(itemId) {
   renderSettingsMenu();
   renderMenu();
   showToast(item.favorite ? "تمت الإضافة للمفضلة ⭐" : "أُزيل من المفضلة.");
+}
+
+function toggleMenuSaleVisibility(itemId) {
+  const item = findMenuItem(itemId);
+  if (!item) return;
+  item.saleVisible = !menuItemIsSaleVisible(item);
+  item.updatedAt = new Date().toISOString();
+  if (!item.saleVisible) item.favorite = false;
+  auditAction("menu.visibility", { itemId: item.id, name: item.name, visible: item.saleVisible });
+  saveState(true);
+  renderSettingsMenu();
+  renderMenu();
+  showToast(item.saleVisible ? `تم إظهار ${item.name} في صفحة البيع.` : `تم إخفاء ${item.name} من صفحة البيع بدون حذفه.`);
 }
 
 // إفلات صنف مسحوب قبل صنف الهدف (السحب بالماوس على الكمبيوتر)

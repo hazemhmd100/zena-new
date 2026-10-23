@@ -56,6 +56,7 @@ function emptyOrderForTable(tableId = state.selectedTable) {
     payments: { cash: 0, bank: 0, wallet: 0 },
     changeReturned: 0,
     note: "",
+    saleDate: state.lastPosSaleDate || todayDateInputValue(),
     createdAt: new Date().toISOString()
   };
 }
@@ -531,7 +532,7 @@ function addItem(itemId, optionId) {
   if (!item) return;
   const order = getOpenOrder();
 
-  // إضافة سطر بخيار (حجم/إضافة): سطر عادي باسم وسعر و id فريد، يحمل تكلفة ومخزون الصنف الأساسي.
+  // كل خيار يمكن أن يرث مكونات الصنف أو يستخدم وصفة مخزون خاصة به.
   const option = optionId && Array.isArray(item.options) ? item.options.find((o) => o.id === optionId) : null;
   if (option) {
     const lineId = `${item.id}__${option.id}`;
@@ -546,9 +547,9 @@ function addItem(itemId, optionId) {
         id: lineId,
         name: `${item.name} - ${option.label}`,
         price: optionPrice,
-        cost: menuItemRecipeCost(item),
+        cost: menuOptionRecipeCost(item, option),
         qty: 1,
-        stockUsage: stockUsageFromMenuItem(item),
+        stockUsage: stockUsageFromMenuOption(item, option),
         isCustomPrice: false
       };
       order.items.push(line);
@@ -699,6 +700,9 @@ function updateLine(itemId, action) {
 
 function syncOrderFields() {
   const order = getOpenOrder();
+  const saleDateInput = typeof document.getElementById === "function" ? document.getElementById("posSaleDateInput") : null;
+  order.saleDate = saleDateInput?.value || order.saleDate || todayDateInputValue();
+  state.lastPosSaleDate = order.saleDate;
   order.customerName = els.customerNameInput.value.trim();
   order.customerPhone = els.customerPhoneInput.value.trim();
   order.customerId = els.customerSelect.value || null;
@@ -785,6 +789,8 @@ async function confirmDebtBeforeClose(customer, math) {
 async function closeInvoice() {
   syncOrderFields();
   const order = getOpenOrder();
+  const saleDate = order.saleDate || todayDateInputValue();
+  if (!guardClosedPeriod(saleDate, "تسجيل فاتورة بيع بهذا التاريخ")) return;
   const math = orderMath(order);
   const rawPaid = paymentTotal(order.payments);
   if (Number(order.changeReturned || 0) > rawPaid + 0.001) {
@@ -858,7 +864,7 @@ async function closeInvoice() {
     payments: invoicePayments,
     status,
     note: math.manualDebt ? order.note || "دين بدون أصناف" : order.note,
-    createdAt: new Date().toISOString()
+    createdAt: invoiceDateFromInput(saleDate)
   };
 
   if (customer) {

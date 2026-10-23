@@ -291,10 +291,12 @@ function printInvoiceById(invoiceId) {
   printInvoice(state.invoices.find((invoice) => invoice.id === invoiceId));
 }
 
-function backupPayload() {
+async function backupPayload() {
   saveState(true);
+  const workspacesBundle = typeof workspaceBackupBundle === "function" ? await workspaceBackupBundle() : null;
   return JSON.stringify({
     ...state,
+    workspacesBundle,
     exportedAt: new Date().toISOString(),
     backupNote: "نسخة احتياطية كاملة من دفتر المقهى"
   }, null, 2);
@@ -345,7 +347,7 @@ function downloadBackupFallback(payload, fileName) {
 }
 
 async function exportData() {
-  const payload = backupPayload();
+  const payload = await backupPayload();
   const fileName = backupFileName();
   const serverSaved = await saveBackupToLocalServer(payload, fileName);
   if (serverSaved) markBackupDone();
@@ -385,7 +387,7 @@ async function saveInternalBackupNow() {
     savedInsideProgram: false,
     savedInBackupsFolder: false
   });
-  const payload = backupPayload();
+  const payload = await backupPayload();
   const fileName = `internal-${backupFileName()}`;
   const localSaved = saveLocalBackup(payload, { source: "manual", forceNew: true });
   let durableSaved = false;
@@ -417,7 +419,7 @@ async function saveInternalBackupNow() {
   };
   saveState(true);
 
-  const finalPayload = backupPayload();
+  const finalPayload = await backupPayload();
   if (finalPayload !== payload) {
     try {
       await writeDurableBackup(backupSnapshot(finalPayload, { source: "manual" }));
@@ -480,7 +482,7 @@ async function maybeAutoDailyBackup() {
     const createdAt = new Date();
     state.lastAutoBackup = today;
     state.lastAutoBackupAt = createdAt.toISOString();
-    const payload = backupPayload();
+    const payload = await backupPayload();
     const name = (typeof businessName === "function" ? businessName() : "cafe-pos").replace(/[\\/:*?"<>|]/g, "").trim() || "cafe-pos";
     const serverSaved = await saveBackupToLocalServer(payload, `${name}-auto-${today}.json`);
     const localSaved = saveLocalBackup(payload, { source: "daily", forceNew: true });
@@ -576,7 +578,7 @@ async function writeBackupToFolder(interactive) {
     const today = todayDateInputValue();
     const fileHandle = await handle.getFileHandle(`${name}-auto-${today}.json`, { create: true });
     const writable = await fileHandle.createWritable();
-    await writable.write(backupPayload());
+    await writable.write(await backupPayload());
     await writable.close();
     state.lastFolderBackup = today;
     if (typeof markBackupDone === "function") markBackupDone();
@@ -632,7 +634,7 @@ async function renderFolderBackupSetting() {
 }
 
 async function shareBackup() {
-  const payload = backupPayload();
+  const payload = await backupPayload();
   const fileName = backupFileName();
   const file = new File([payload], fileName, { type: "application/json" });
 
@@ -708,16 +710,23 @@ function importData(file) {
 
       // نسخة أمان قبل الاستيراد: محاولة بس، فشلها ما يوقف الاستيراد (الملف المستورد سليم أصلاً)
       try {
-        const beforePayload = backupPayload();
+        const beforePayload = await backupPayload();
         await saveBackupToLocalServer(beforePayload, `before-import-${backupFileName()}`);
       } catch (safetyError) {
         console.warn("استيراد النسخة: تعذّرت نسخة الأمان قبل الاستيراد، بنكمل الاستيراد على أي حال", safetyError);
       }
 
+      if (parsed.workspacesBundle && typeof restoreWorkspaceBackupBundle === "function") {
+        await restoreWorkspaceBackupBundle(parsed.workspacesBundle);
+      }
       state = {
         ...nextState,
         view: "invoices",
       };
+      if (parsed.workspacesBundle) {
+        const activeRaw = localStorage.getItem(workspaceStateKey(workspaceRegistry.activeId));
+        if (activeRaw) state = { ...normalizeState(JSON.parse(activeRaw)), view: "invoices" };
+      }
       auditAction("backup.import", {
         fileName: file.name || "",
         invoices: state.invoices.length,
@@ -780,7 +789,7 @@ async function restoreBackupSnapshot(snapshot) {
   if (!confirmed) return;
 
   try {
-    const beforePayload = backupPayload();
+    const beforePayload = await backupPayload();
     saveLocalBackup(beforePayload, { source: "before_restore", forceNew: true });
     await saveBackupToLocalServer(beforePayload, `before-local-restore-${backupFileName()}`);
   } catch (error) {
@@ -791,6 +800,11 @@ async function restoreBackupSnapshot(snapshot) {
     ...nextState,
     view: "guide"
   };
+  if (nextState.workspacesBundle && typeof restoreWorkspaceBackupBundle === "function") {
+    await restoreWorkspaceBackupBundle(nextState.workspacesBundle);
+    const activeRaw = localStorage.getItem(workspaceStateKey(workspaceRegistry.activeId));
+    if (activeRaw) state = { ...normalizeState(JSON.parse(activeRaw)), view: "guide" };
+  }
   auditAction("backup.restore", {
     restoredAt: snapshot.createdAt || "",
     invoices: state.invoices.length,
@@ -1852,6 +1866,7 @@ function setMenuFormMode(item = null) {
   els.menuFormTitle.textContent = item ? "تعديل صنف" : "إضافة صنف";
   els.menuSubmitButton.textContent = item ? "حفظ التعديل" : "إضافة الصنف";
   els.menuCancelEditButton.hidden = !item;
+  if (els.menuComponentSearchInput) els.menuComponentSearchInput.value = "";
 
   if (!item) {
     menuComponentDraft = [];
@@ -1868,6 +1883,7 @@ function setMenuFormMode(item = null) {
   els.menuNameInput.value = item.name || "";
   els.menuPriceInput.value = inputNumberValue(item.price);
   els.menuCostInput.value = inputNumberValue(item.cost);
+  if (els.menuManualLastUnitCostInput) els.menuManualLastUnitCostInput.value = inputNumberValue(item.manualLastUnitCost);
   els.menuOperatingCostInput.value = inputNumberValue(item.operatingCost);
   els.menuOperatingCostTypeInput.value = operatingCostTypes.includes(item.operatingCostType) ? item.operatingCostType : "other";
   els.menuCategoryInput.value = item.category || "";
@@ -1889,6 +1905,8 @@ function saveMenuItem(event) {
   const price = Number(els.menuPriceInput.value || 0);
   const costInput = els.menuCostInput.value.trim();
   const cost = costInput === "" ? 0 : Number(costInput);
+  const manualLastUnitCostInput = els.menuManualLastUnitCostInput?.value.trim() || "";
+  const manualLastUnitCost = manualLastUnitCostInput === "" ? 0 : Number(manualLastUnitCostInput);
   const operatingCostInput = els.menuOperatingCostInput.value.trim();
   const operatingCost = operatingCostInput === "" ? 0 : Number(operatingCostInput);
   const operatingCostType = operatingCostTypes.includes(els.menuOperatingCostTypeInput.value)
@@ -1897,7 +1915,7 @@ function saveMenuItem(event) {
   const category = els.menuCategoryInput.value.trim();
   const components = normalizeMenuComponents(menuComponentDraft, editingMenuItemId || "");
   const options = normalizeMenuOptions(menuOptionsDraft);
-  if (!name || !category || price <= 0 || cost < 0 || operatingCost < 0 || (!components.length && costInput === "" && operatingCostInput === "")) {
+  if (!name || !category || price <= 0 || cost < 0 || manualLastUnitCost < 0 || operatingCost < 0 || (!components.length && costInput === "" && operatingCostInput === "")) {
     showToast("أكمل بيانات الصنف أو أضف مكونات من المخزون.");
     return;
   }
@@ -1911,14 +1929,14 @@ function saveMenuItem(event) {
       return;
     }
 
-    Object.assign(item, { name, price, cost, operatingCost, operatingCostType, category, components, options });
+    Object.assign(item, { name, price, cost, manualLastUnitCost, operatingCost, operatingCostType, category, components, options });
     setMenuFormMode();
     showToast("تم حفظ تعديل الصنف.");
     render();
     return;
   }
 
-  state.menu.push({ id: uid("item"), name, price, cost, operatingCost, operatingCostType, category, components, options });
+  state.menu.push({ id: uid("item"), name, price, cost, manualLastUnitCost, operatingCost, operatingCostType, category, components, options });
   setMenuFormMode();
   showToast("تمت إضافة الصنف.");
   render();

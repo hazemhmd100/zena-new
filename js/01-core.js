@@ -8,7 +8,11 @@ const APP_THEME_KEY = "cafe-pos-theme";
 const AUTO_BACKUP_KEY = "cafe-pos-ledger-v1-auto-backup";
 const BACKUP_HISTORY_KEY = "cafe-pos-ledger-v1-backup-history";
 const BACKUP_DB_NAME = "cafe-pos-ledger-backups";
+const WORKSPACE_REGISTRY_KEY = "cafe-pos-ledger-v1-workspaces";
+const ACTIVE_WORKSPACE_KEY = "cafe-pos-ledger-v1-active-workspace";
+const LEGACY_WORKSPACE_ID = "workspace-original";
 const BACKUP_STORE_NAME = "snapshots";
+const WORKSPACE_LOCAL_STORAGE_LIMIT = 750000;
 const MAX_BACKUP_HISTORY = 20;
 const MAX_AUTO_BACKUP_HISTORY = 3;
 const MAX_AUDIT_LOG = 500;
@@ -70,6 +74,7 @@ let loadedStateSavedAt = 0;
 let backupWriteTimer = null;
 // تتعبى فعلياً في js/12-init.js بعد تحميل كل الملفات (loadState يحتاج دوال من 02-domain)
 let state = null;
+let workspaceRegistry = null;
 let selectedCategory = "الكل";
 let expandedMenuOptionsItemId = "";
 let optionPickerCleanup = null;
@@ -86,6 +91,8 @@ let purchaseUnitAutofillState = {};
 let inventoryDraft = {};
 let menuComponentDraft = [];
 let menuOptionsDraft = [];
+let posMenuSortMode = false;
+let posDraggedMenuId = null;
 let comboDraft = [];
 let invoiceViewLimit = 50;
 const INVOICE_VIEW_STEP = 50;
@@ -550,10 +557,12 @@ const els = {
   menuNameInput: $("#menuNameInput"),
   menuPriceInput: $("#menuPriceInput"),
   menuCostInput: $("#menuCostInput"),
+  menuManualLastUnitCostInput: $("#menuManualLastUnitCostInput"),
   menuOperatingCostInput: $("#menuOperatingCostInput"),
   menuOperatingCostTypeInput: $("#menuOperatingCostTypeInput"),
   menuCategoryInput: $("#menuCategoryInput"),
   menuComponentItemInput: $("#menuComponentItemInput"),
+  menuComponentSearchInput: $("#menuComponentSearchInput"),
   menuComponentQtyInput: $("#menuComponentQtyInput"),
   menuComponentAddButton: $("#menuComponentAddButton"),
   menuComponentsList: $("#menuComponentsList"),
@@ -603,6 +612,15 @@ const els = {
   brandMark: $("#brandMark"),
   themeToggleButton: $("#themeToggleButton"),
   roleToggleButton: $("#roleToggleButton"),
+  workspaceProfileSelect: $("#workspaceProfileSelect"),
+  workspaceCreateButton: $("#workspaceCreateButton"),
+  workspaceReadonlyBanner: $("#workspaceReadonlyBanner"),
+  workspaceCreateModal: $("#workspaceCreateModal"),
+  workspaceCreateBackdrop: $("#workspaceCreateBackdrop"),
+  workspaceCreateForm: $("#workspaceCreateForm"),
+  workspaceCreateCloseButton: $("#workspaceCreateCloseButton"),
+  workspaceCreateCancelButton: $("#workspaceCreateCancelButton"),
+  workspaceNameInput: $("#workspaceNameInput"),
   businessNameInput: $("#businessNameInput"),
   businessNameSaveButton: $("#businessNameSaveButton"),
   guideLive: $("#guideLive"),
@@ -728,6 +746,7 @@ function defaultState() {
     lastPaymentMethod: "cash",
     lastWorkerTransactionType: WORKER_ADVANCE_TYPE,
     lastWorkerConsumptionMode: "worker_price",
+    lastPosSaleDate: "",
     menu: normalizeMenuItems(defaultMenu),
     customers: [],
     workers: [],
@@ -755,6 +774,7 @@ function defaultState() {
     ownerWithdrawals: [],
     partners: [],
     partnerFundingTransactions: [],
+    partnerOpeningFunding: {},
     partnerDistributionBasis: "cash",
     partnerDistributionSource: "period",
     periodCloseCashSource: "period",
@@ -769,9 +789,62 @@ function defaultState() {
     lastFolderBackup: "",
     supplierPayments: [],
     supplierTransactions: [],
+    supplierOpeningBalances: [],
+    workspaceStartedAt: "",
+    workspaceEndedAt: "",
     loyalty: { enabled: true, perShekel: 1, rewardPoints: 100, rewardValue: 10 },
     combos: []
   };
+}
+
+function workspaceStateKey(id) {
+  return `${STORAGE_KEY}-workspace-${String(id || LEGACY_WORKSPACE_ID)}`;
+}
+
+function normalizeWorkspaceRegistry(value) {
+  const rows = Array.isArray(value?.profiles) ? value.profiles : [];
+  const profiles = rows.map((profile) => ({
+    id: String(profile?.id || "").trim(),
+    name: String(profile?.name || "ملف عمل").trim() || "ملف عمل",
+    createdAt: String(profile?.createdAt || new Date().toISOString()),
+    archived: Boolean(profile?.archived)
+  })).filter((profile) => profile.id);
+  if (!profiles.length) profiles.push({ id: LEGACY_WORKSPACE_ID, name: "العمل القديم", createdAt: new Date().toISOString(), archived: false });
+  let activeId = String(value?.activeId || localStorage.getItem(ACTIVE_WORKSPACE_KEY) || profiles[0].id);
+  if (!profiles.some((profile) => profile.id === activeId)) activeId = profiles[0].id;
+  return { version: 1, activeId, profiles };
+}
+
+function loadWorkspaceRegistry() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(WORKSPACE_REGISTRY_KEY) || "null");
+    const registry = normalizeWorkspaceRegistry(parsed);
+    if (!parsed) {
+      const current = localStorage.getItem(STORAGE_KEY);
+      if (current && current.length <= WORKSPACE_LOCAL_STORAGE_LIMIT) localStorage.setItem(workspaceStateKey(LEGACY_WORKSPACE_ID), current);
+    }
+    localStorage.setItem(WORKSPACE_REGISTRY_KEY, JSON.stringify(registry));
+    localStorage.setItem(ACTIVE_WORKSPACE_KEY, registry.activeId);
+    return registry;
+  } catch (error) {
+    console.warn("Could not load workspaces", error);
+    return normalizeWorkspaceRegistry(null);
+  }
+}
+
+function activeWorkspaceProfile() {
+  if (!workspaceRegistry) workspaceRegistry = loadWorkspaceRegistry();
+  return workspaceRegistry.profiles.find((profile) => profile.id === workspaceRegistry.activeId) || workspaceRegistry.profiles[0];
+}
+
+function workspaceIsReadOnly() {
+  return Boolean(activeWorkspaceProfile()?.archived);
+}
+
+function saveWorkspaceRegistry() {
+  if (!workspaceRegistry) return;
+  localStorage.setItem(WORKSPACE_REGISTRY_KEY, JSON.stringify(workspaceRegistry));
+  localStorage.setItem(ACTIVE_WORKSPACE_KEY, workspaceRegistry.activeId);
 }
 
 function normalizeAutoBackupTimeValue(value) {
@@ -844,6 +917,9 @@ function normalizeState(parsed = {}) {
   const next = {
     ...fallback,
     ...parsed,
+    supplierOpeningBalances: Array.isArray(parsed.supplierOpeningBalances) ? parsed.supplierOpeningBalances : [],
+    workspaceStartedAt: String(parsed.workspaceStartedAt || ""),
+    workspaceEndedAt: String(parsed.workspaceEndedAt || ""),
     reportingStart: parsed.reportingStart && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(parsed.reportingStart.localTime || "") && Number.isFinite(Date.parse(parsed.reportingStart.localTime))
       ? { localTime: parsed.reportingStart.localTime, backupFile: String(parsed.reportingStart.backupFile || ""), createdAt: String(parsed.reportingStart.createdAt || "") }
       : null,
@@ -854,6 +930,7 @@ function normalizeState(parsed = {}) {
     lastPaymentMethod: paymentMethods.includes(parsed.lastPaymentMethod) ? parsed.lastPaymentMethod : "cash",
     lastWorkerTransactionType: workerTransactionTypeLabels[parsed.lastWorkerTransactionType] ? parsed.lastWorkerTransactionType : WORKER_ADVANCE_TYPE,
     lastWorkerConsumptionMode: ["worker_price", SALARY_WORKER_CONSUMPTION_TYPE, FREE_WORKER_CONSUMPTION_TYPE].includes(parsed.lastWorkerConsumptionMode) ? parsed.lastWorkerConsumptionMode : "worker_price",
+    lastPosSaleDate: /^\d{4}-\d{2}-\d{2}$/.test(String(parsed.lastPosSaleDate || "")) ? String(parsed.lastPosSaleDate) : "",
     menu: normalizeMenuItems(parsed.menu?.length ? parsed.menu : defaultMenu),
     customers: Array.isArray(parsed.customers) ? parsed.customers : [],
     workers: Array.isArray(parsed.workers) ? parsed.workers.map(normalizeWorker) : [],
@@ -900,6 +977,7 @@ function normalizeState(parsed = {}) {
     partnerFundingTransactions: Array.isArray(parsed.partnerFundingTransactions)
       ? parsed.partnerFundingTransactions.map(normalizePartnerFundingTransaction).filter(Boolean)
       : [],
+    partnerOpeningFunding: parsed.partnerOpeningFunding && typeof parsed.partnerOpeningFunding === "object" ? parsed.partnerOpeningFunding : {},
     partnerDistributionBasis: parsed.partnerDistributionBasis === "profit" ? "profit" : "cash",
     partnerDistributionSource: parsed.partnerDistributionSource === "onHand" ? "onHand" : "period",
     periodCloseCashSource: parsed.periodCloseCashSource === "onHand" ? "onHand" : "period",
@@ -1086,9 +1164,9 @@ function rebuildCustomerAccountsFromInvoices(data = state) {
     if (!customer) return;
 
     if (!touched.has(customer.id)) {
-      customer.balance = 0;
-      customer.totalBilled = 0;
-      customer.totalPaid = 0;
+      customer.balance = Number(customer.openingBalance || 0);
+      customer.totalBilled = Number(customer.openingTotalBilled || 0);
+      customer.totalPaid = Number(customer.openingTotalPaid || 0);
       touched.add(customer.id);
     }
 
@@ -1323,7 +1401,9 @@ function snapshotState(snapshot) {
 
 function loadState() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    workspaceRegistry = loadWorkspaceRegistry();
+    const profileRaw = localStorage.getItem(workspaceStateKey(workspaceRegistry.activeId));
+    const raw = profileRaw || localStorage.getItem(STORAGE_KEY);
     loadedStateSavedAt = Number(localStorage.getItem(STATE_SAVED_AT_KEY) || 0) || 0;
     if (!raw) {
       const backup = loadLocalBackupState();
@@ -1389,6 +1469,10 @@ function persistStateNow(options = {}) {
   if (serialized === lastSavedSerialized) return;
   try {
     localStorage.setItem(STORAGE_KEY, serialized);
+    if (!workspaceRegistry) workspaceRegistry = loadWorkspaceRegistry();
+    if (serialized.length <= WORKSPACE_LOCAL_STORAGE_LIMIT) {
+      localStorage.setItem(workspaceStateKey(workspaceRegistry.activeId), serialized);
+    }
     localStorage.setItem(STATE_SAVED_AT_KEY, String(Date.now()));
     lastSavedSerialized = serialized;
   } catch (error) {
@@ -1505,6 +1589,31 @@ function openBackupDatabase() {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+}
+
+async function saveWorkspaceStateLarge(profileId, value = state) {
+  const database = await openBackupDatabase();
+  const payload = typeof value === "string" ? value : JSON.stringify(value);
+  return new Promise((resolve, reject) => {
+    const tx = database.transaction(BACKUP_STORE_NAME, "readwrite");
+    tx.objectStore(BACKUP_STORE_NAME).put({ id: `workspace-state:${profileId}`, payload, savedAt: new Date().toISOString() });
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function loadWorkspaceStateLarge(profileId) {
+  try {
+    const database = await openBackupDatabase();
+    return await new Promise((resolve) => {
+      const tx = database.transaction(BACKUP_STORE_NAME, "readonly");
+      const req = tx.objectStore(BACKUP_STORE_NAME).get(`workspace-state:${profileId}`);
+      req.onsuccess = () => resolve(req.result?.payload || "");
+      req.onerror = () => resolve("");
+    });
+  } catch (error) {
+    return "";
+  }
 }
 
 // ─── تخزين مقبض مجلد النسخ التلقائي (File System Access) في IndexedDB ──

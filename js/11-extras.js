@@ -8,6 +8,415 @@
 const LAST_BACKUP_KEY = "cafe-pos-last-backup-at";
 const BACKUP_SNOOZE_KEY = "cafe-pos-backup-snooze-until";
 
+function workspaceClone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+async function workspaceBackupBundle() {
+  if (!workspaceRegistry) workspaceRegistry = loadWorkspaceRegistry();
+  const profiles = {};
+  for (const profile of workspaceRegistry.profiles) {
+    let raw = profile.id === workspaceRegistry.activeId
+      ? JSON.stringify(state)
+      : await loadWorkspaceStateLarge(profile.id) || localStorage.getItem(workspaceStateKey(profile.id));
+    let parsed = null;
+    try { parsed = raw ? JSON.parse(raw) : null; } catch (error) {}
+    const legacyNeedsRecovery = profile.id === LEGACY_WORKSPACE_ID
+      && profile.archived
+      && (!Array.isArray(parsed?.purchases) || parsed.purchases.length === 0);
+    if (!parsed || legacyNeedsRecovery) {
+      const recovered = await recoverWorkspaceState(profile);
+      if (recovered) parsed = recovered;
+    }
+    if (parsed) profiles[profile.id] = parsed;
+  }
+  return { registry: workspaceClone(workspaceRegistry), profiles };
+}
+
+async function restoreWorkspaceBackupBundle(bundle) {
+  if (!bundle?.registry || !bundle?.profiles) return false;
+  const registry = normalizeWorkspaceRegistry(bundle.registry);
+  for (const profile of registry.profiles) {
+    const profileState = bundle.profiles[profile.id];
+    if (!profileState) continue;
+    const normalized = normalizeState(profileState);
+    const serialized = JSON.stringify(normalized);
+    let durableSaved = false;
+    try {
+      await saveWorkspaceStateLarge(profile.id, serialized);
+      durableSaved = true;
+    } catch (error) {
+      console.warn("Could not restore large workspace storage", error);
+    }
+    if (serialized.length <= WORKSPACE_LOCAL_STORAGE_LIMIT || !durableSaved) {
+      try { localStorage.setItem(workspaceStateKey(profile.id), serialized); } catch (error) {}
+    } else {
+      localStorage.removeItem(workspaceStateKey(profile.id));
+    }
+  }
+  workspaceRegistry = registry;
+  saveWorkspaceRegistry();
+  return true;
+}
+
+function renderWorkspaceSwitcher() {
+  if (!els.workspaceProfileSelect) return;
+  if (!workspaceRegistry) workspaceRegistry = loadWorkspaceRegistry();
+  els.workspaceProfileSelect.innerHTML = workspaceRegistry.profiles.map((profile) => `
+    <option value="${escapeAttr(profile.id)}">${escapeHtml(profile.name)}${profile.archived ? " (قديم)" : " (حالي)"}</option>
+  `).join("");
+  els.workspaceProfileSelect.value = workspaceRegistry.activeId;
+  if (els.workspaceReadonlyBanner) els.workspaceReadonlyBanner.hidden = !workspaceIsReadOnly();
+  document.body.classList.toggle("is-workspace-readonly", workspaceIsReadOnly());
+}
+
+function openWorkspaceCreateModal() {
+  if (!isManagerMode()) return;
+  if (workspaceIsReadOnly()) {
+    showToast("ارجع إلى ملف العمل الحالي قبل إنشاء ملف جديد.");
+    return;
+  }
+  els.workspaceCreateModal.hidden = false;
+  els.workspaceNameInput.value = `العمل الجديد ${new Date().getFullYear()}`;
+  setTimeout(() => { els.workspaceNameInput.focus(); els.workspaceNameInput.select(); }, 0);
+}
+
+function closeWorkspaceCreateModal() {
+  els.workspaceCreateModal.hidden = true;
+}
+
+function continuationWorkspaceState() {
+  const now = new Date().toISOString();
+  const today = todayDateInputValue();
+  const cash = cashOnHand();
+  const inventory = typeof purchaseInventoryItems === "function" ? purchaseInventoryItems() : [];
+  const supplierOpenings = typeof supplierBalances === "function" ? supplierBalances() : [];
+  const next = defaultState();
+
+  next.workspaceStartedAt = now;
+  next.businessName = state.businessName;
+  next.theme = state.theme;
+  next.appPin = state.appPin;
+  next.printSize = state.printSize;
+  next.autoBackup = state.autoBackup;
+  next.autoBackupTime = state.autoBackupTime;
+  next.tableCount = state.tableCount;
+  next.tableNames = workspaceClone(state.tableNames || {});
+  next.lowStockThreshold = state.lowStockThreshold;
+  next.loyalty = workspaceClone(state.loyalty || next.loyalty);
+  next.menu = workspaceClone(state.menu || []);
+  next.combos = workspaceClone(state.combos || []);
+  next.customerPrices = workspaceClone(state.customerPrices || []);
+  next.customers = (state.customers || []).map((customer) => ({
+    ...workspaceClone(customer),
+    openingBalance: Number(customer.balance || 0),
+    openingTotalBilled: 0,
+    openingTotalPaid: 0,
+    balance: Number(customer.balance || 0),
+    totalBilled: 0,
+    totalPaid: 0,
+    createdAt: customer.createdAt || now,
+    updatedAt: now
+  }));
+  next.workers = (state.workers || []).map((worker) => {
+    const account = workerMonthlyAccount(worker);
+    const todaySalary = workerGrossSalaryForRange(worker, today, today);
+    const openingDue = Number(account.due || 0) - Number(todaySalary || 0);
+    return {
+      ...workspaceClone(worker),
+      openingDue,
+      openingAccount: {
+        due: openingDue,
+        salary: Math.max(Number(account.salary || 0) - Number(todaySalary || 0), 0),
+        advances: Number(account.advances || 0),
+        salaryPaid: Number(account.salaryPaid || 0),
+        paymentIn: Number(account.paymentIn || 0),
+        salaryDeductions: Number(account.drinkStats?.salaryDeductions || 0),
+        sourceWorkspace: activeWorkspaceProfile()?.name || "الملف السابق",
+        transferredAt: now
+      },
+      periodFrom: today,
+      periodTo: "",
+      salaryHistory: [{ from: today, salary: Number(worker.salary || 0) }]
+    };
+  });
+  next.partners = workspaceClone(state.partners || []);
+  next.partnerOpeningFunding = (state.partners || []).reduce((result, partner) => {
+    result[partner.id] = Number(partnerFundingBalance(partner.id).outstandingRefundable || 0);
+    return result;
+  }, {});
+  next.supplierOpeningBalances = supplierOpenings.map((supplier) => ({ supplier: supplier.supplier, owed: Number(supplier.owed || 0), createdAt: now }));
+  next.manualPurchaseInventoryItems = inventory.filter((item) => Number(item.stockQty || 0) > 0.001).map((item) => ({
+    id: uid("opening-stock"),
+    name: item.name || item.rawName,
+    stockQty: Number(item.stockQty || 0),
+    stockUnit: item.stockUnit || "وحدة",
+    purchaseUnit: item.purchaseUnit || item.stockUnit || "وحدة",
+    cost: Number(item.lastPurchaseUnitCost || item.cost || 0),
+    status: item.availabilityStatus || "active",
+    note: "رصيد افتتاحي من ملف العمل السابق",
+    createdAt: now,
+    updatedAt: now
+  }));
+  next.openingCash = {
+    cash: Number(cash.methods.cash.current || 0),
+    bank: Number(cash.methods.bank.current || 0),
+    wallet: Number(cash.methods.wallet.current || 0)
+  };
+  next.selectedTable = 1;
+  next.view = "dashboard";
+  next.auditLog = [{ id: uid("audit"), action: "workspace.opening", details: { source: activeWorkspaceProfile()?.name || "الملف السابق" }, createdAt: now }];
+  return normalizeState(next);
+}
+
+async function repairActiveWorkerOpeningAccounts() {
+  if (!workspaceRegistry) workspaceRegistry = loadWorkspaceRegistry();
+  const active = activeWorkspaceProfile();
+  if (!active || active.archived || workspaceRegistry.profiles.length < 2) return false;
+  const needsRepair = (state.workers || []).some((worker) => !worker.openingAccount);
+  if (!needsRepair) return false;
+
+  const activeTime = new Date(active.createdAt || state.workspaceStartedAt || 0).getTime();
+  const previous = workspaceRegistry.profiles
+    .filter((profile) => profile.id !== active.id && profile.archived && new Date(profile.createdAt || 0).getTime() <= activeTime)
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))[0];
+  if (!previous) return false;
+
+  const raw = localStorage.getItem(workspaceStateKey(previous.id)) || await loadWorkspaceStateLarge(previous.id);
+  if (!raw) return false;
+  let previousState;
+  try { previousState = normalizeState(JSON.parse(raw)); } catch (error) { return false; }
+
+  const currentState = state;
+  const transferDay = String(active.createdAt || state.workspaceStartedAt || new Date().toISOString()).slice(0, 10);
+  state = previousState;
+  const openings = new Map((previousState.workers || []).map((worker) => {
+    const range = workerRangeFor(worker);
+    range.maxDate = transferDay;
+    if (range.maxDate < range.minDate) range.maxDate = range.minDate;
+    const account = workerAccountForRange(worker, range);
+    const transitionSalary = workerGrossSalaryForRange(worker, transferDay, transferDay);
+    const due = Number(account.due || 0) - Number(transitionSalary || 0);
+    return [worker.id, {
+      due,
+      salary: Math.max(Number(account.salary || 0) - Number(transitionSalary || 0), 0),
+      advances: Number(account.advances || 0),
+      salaryPaid: Number(account.salaryPaid || 0),
+      paymentIn: Number(account.paymentIn || 0),
+      salaryDeductions: Number(account.drinkStats?.salaryDeductions || 0),
+      sourceWorkspace: previous.name,
+      transferredAt: active.createdAt || new Date().toISOString()
+    }];
+  }));
+  state = currentState;
+
+  let repaired = 0;
+  state.workers.forEach((worker) => {
+    if (worker.openingAccount) return;
+    const opening = openings.get(worker.id) || [...openings.entries()].find(([id]) => {
+      const oldWorker = previousState.workers.find((entry) => entry.id === id);
+      return oldWorker && oldWorker.name.trim().toLowerCase() === worker.name.trim().toLowerCase();
+    })?.[1];
+    if (!opening) return;
+    worker.openingDue = opening.due;
+    worker.openingAccount = opening;
+    repaired += 1;
+  });
+  if (!repaired) return false;
+
+  if (!previousState.workspaceEndedAt) {
+    previousState.workspaceEndedAt = active.createdAt || new Date().toISOString();
+    const previousSerialized = JSON.stringify(previousState);
+    if (previousSerialized.length <= WORKSPACE_LOCAL_STORAGE_LIMIT) localStorage.setItem(workspaceStateKey(previous.id), previousSerialized);
+    await saveWorkspaceStateLarge(previous.id, previousState);
+  }
+  saveState({ immediate: true, backup: true });
+  await saveWorkspaceStateLarge(active.id, state);
+  render();
+  showToast(`تمت مزامنة حساب ${repaired} عامل بين الملف القديم والجديد.`);
+  return true;
+}
+
+async function recoverWorkspaceState(profile) {
+  const snapshots = await backupSnapshots();
+  const laterProfileTimes = workspaceRegistry.profiles
+    .filter((entry) => new Date(entry.createdAt || 0) > new Date(profile.createdAt || 0))
+    .map((entry) => new Date(entry.createdAt || 0).getTime());
+  const cutoff = laterProfileTimes.length ? Math.min(...laterProfileTimes) : Date.now();
+
+  for (const snapshot of snapshots) {
+    let parsed;
+    try { parsed = JSON.parse(snapshot.payload); } catch (error) { continue; }
+    const bundled = parsed?.workspacesBundle?.profiles?.[profile.id];
+    if (bundled) {
+      const normalized = normalizeState(bundled);
+      if (profile.id !== LEGACY_WORKSPACE_ID || normalized.purchases.length) return normalized;
+    }
+    const snapshotTime = new Date(snapshot.createdAt || 0).getTime();
+    if (profile.id === LEGACY_WORKSPACE_ID && snapshotTime <= cutoff && !parsed.workspaceStartedAt) {
+      const normalized = normalizeState(parsed);
+      if (normalized.purchases.length) return normalized;
+    }
+  }
+  if (profile.id === LEGACY_WORKSPACE_ID && location.protocol.startsWith("http")) {
+    try {
+      const response = await fetch("./backups/workspace-original-recovery.json", { cache: "no-store" });
+      if (response.ok) {
+        const parsed = await response.json();
+        if (Array.isArray(parsed.invoices) && parsed.invoices.length) return normalizeState(parsed);
+      }
+    } catch (error) {
+      console.warn("Could not recover original workspace from backups folder", error);
+    }
+  }
+  return null;
+}
+
+async function repairActiveArchivedWorkspace() {
+  const profile = activeWorkspaceProfile();
+  if (!profile?.archived || profile.id !== LEGACY_WORKSPACE_ID || (state.purchases || []).length) return;
+  const recovered = await recoverWorkspaceState(profile);
+  if (!recovered || !(recovered.purchases || []).length) return;
+  state = recovered;
+  state.view = "purchases";
+  selectedPurchaseSection = "records";
+  const serialized = JSON.stringify(state);
+  await saveWorkspaceStateLarge(profile.id, serialized);
+  if (serialized.length <= WORKSPACE_LOCAL_STORAGE_LIMIT) localStorage.setItem(workspaceStateKey(profile.id), serialized);
+  localStorage.setItem(STORAGE_KEY, serialized);
+  lastSavedSerialized = serialized;
+  render();
+  showToast(`تم استرجاع ${(state.purchases || []).length} فاتورة مشتريات من الملف القديم.`);
+}
+
+async function activateWorkspace(profileId) {
+  const profile = workspaceRegistry?.profiles.find((entry) => entry.id === profileId);
+  if (!profile || profile.id === workspaceRegistry.activeId) return;
+  persistStateNow({ backup: true });
+  try { await saveWorkspaceStateLarge(workspaceRegistry.activeId, state); } catch (error) { console.warn("Could not preserve current workspace", error); }
+  let raw = localStorage.getItem(workspaceStateKey(profile.id)) || await loadWorkspaceStateLarge(profile.id);
+  let storedState = null;
+  try { storedState = raw ? JSON.parse(raw) : null; } catch (error) {}
+  const incompleteOriginalArchive = profile.id === LEGACY_WORKSPACE_ID
+    && profile.archived
+    && (
+      !Array.isArray(storedState?.invoices)
+      || storedState.invoices.length === 0
+      || !Array.isArray(storedState?.purchases)
+      || storedState.purchases.length === 0
+    );
+  if (!raw || incompleteOriginalArchive) {
+    showToast("جاري استرجاع الملف القديم من النسخة الداخلية...");
+    const recovered = await recoverWorkspaceState(profile);
+    if (!recovered) {
+      els.workspaceProfileSelect.value = workspaceRegistry.activeId;
+      showToast("تعذر استرجاع الملف القديم تلقائياً. لم يتم تغيير الملف الحالي.");
+      return;
+    }
+    raw = JSON.stringify(recovered);
+    await saveWorkspaceStateLarge(profile.id, raw);
+    if (raw.length <= WORKSPACE_LOCAL_STORAGE_LIMIT) localStorage.setItem(workspaceStateKey(profile.id), raw);
+  }
+  workspaceRegistry.activeId = profile.id;
+  saveWorkspaceRegistry();
+  state = normalizeState(JSON.parse(raw));
+  if (profile.archived) {
+    state.view = "purchases";
+    selectedPurchaseSection = "records";
+    if (els.purchaseSearchInput) els.purchaseSearchInput.value = "";
+    if (els.purchaseRecordFilterInput) els.purchaseRecordFilterInput.value = "all";
+    if (els.purchaseExpensePurposeFilterInput) els.purchaseExpensePurposeFilterInput.value = "all";
+    const dateFrom = document.getElementById("purchaseDateFromInput");
+    const dateTo = document.getElementById("purchaseDateToInput");
+    if (dateFrom) dateFrom.value = "";
+    if (dateTo) dateTo.value = "";
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  lastSavedSerialized = JSON.stringify(state);
+  selectedCustomerId = state.customers[0]?.id || null;
+  selectedWorkerId = state.workers[0]?.id || null;
+  lastClosedInvoice = state.invoices[0] || null;
+  purchaseDraftItems = [];
+  renderWorkspaceSwitcher();
+  applyAppTheme();
+  render();
+  showToast(`تم فتح ${profile.name}.`);
+}
+
+async function createContinuationWorkspace(event) {
+  event.preventDefault();
+  const name = String(els.workspaceNameInput.value || "").trim();
+  if (!name) { showToast("اكتب اسم الملف الجديد."); return; }
+  const confirmed = await appConfirm("سيتم حفظ الملف الحالي كملف قديم للعرض، ثم فتح ملف جديد بالأرصدة الحالية. هل تريد المتابعة؟", { yesLabel: "إنشاء الملف", danger: false });
+  if (!confirmed) return;
+  const previous = activeWorkspaceProfile();
+  const next = continuationWorkspaceState();
+  state.workspaceEndedAt = new Date().toISOString();
+  saveState({ immediate: true, backup: true });
+  await saveWorkspaceStateLarge(previous.id, state);
+  const previousRaw = JSON.stringify(state);
+  if (previousRaw.length <= WORKSPACE_LOCAL_STORAGE_LIMIT) localStorage.setItem(workspaceStateKey(previous.id), previousRaw);
+  previous.archived = true;
+  const profile = { id: uid("workspace"), name, createdAt: new Date().toISOString(), archived: false };
+  workspaceRegistry.profiles.push(profile);
+  workspaceRegistry.activeId = profile.id;
+  saveWorkspaceRegistry();
+  localStorage.setItem(workspaceStateKey(profile.id), JSON.stringify(next));
+  await saveWorkspaceStateLarge(profile.id, next);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  state = next;
+  lastSavedSerialized = JSON.stringify(next);
+  selectedCustomerId = state.customers[0]?.id || null;
+  selectedWorkerId = state.workers[0]?.id || null;
+  lastClosedInvoice = null;
+  purchaseDraftItems = [];
+  closeWorkspaceCreateModal();
+  renderWorkspaceSwitcher();
+  render();
+  showToast("تم إنشاء ملف العمل الجديد، والقديم محفوظ للرجوع إليه.");
+}
+
+function blockArchivedWorkspaceMutation(event) {
+  if (!workspaceIsReadOnly()) return;
+  if (event.type === "submit") {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    showToast("الملف القديم للعرض فقط. ارجع للملف الحالي للتسجيل.");
+    return;
+  }
+  const button = event.target.closest("button");
+  if (!button || !button.closest("main")) return;
+  const allowed = button.matches(`
+    [data-go-view],
+    [data-open-invoice-customer],
+    [data-customer-card],
+    [data-show-more-invoices],
+    [data-show-more-customer-ledger],
+    [data-show-more-inventory-history],
+    [data-show-more-worker-ledger],
+    [data-show-more-cash-ledger],
+    [data-invoice-record-filter],
+    [data-invoice-quick-range],
+    [data-report-quick-range],
+    [data-report-section-tab],
+    [data-report-special],
+    [data-purchase-section-tab],
+    [data-open-supplier],
+    [data-worker-section-tab],
+    [data-partner-source],
+    .invoice-print-button,
+    .customer-statement-button,
+    #reportClearTimeButton,
+    #reportingHistoryButton,
+    #reportingStartCancelButton,
+    #reportSoldItemsJumpButton
+  `);
+  if (allowed) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  showToast("الملف القديم للعرض فقط. ارجع للملف الحالي للتسجيل.");
+}
+
 function markBackupDone() {
   localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString());
   els.backupReminderBanner.hidden = true;

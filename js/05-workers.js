@@ -1070,6 +1070,7 @@ function renderWorkerDetail() {
   }
   els.workerKpis.innerHTML = `
     <article class="current-balance-card"><span>الخلاصة الآن</span><strong>${workerBalanceText(account.due)}</strong></article>
+    ${Math.abs(account.openingDue) > 0.001 ? `<article><span>رصيد مرحّل من الملف السابق</span><strong>${workerBalanceText(account.openingDue)}</strong></article>` : ""}
     <article><span>مستحق الفترة (${account.leaveDays > 0 ? `${account.payableDays} من ${account.periodDays}` : account.periodDays} يوم)</span><strong>${money(account.salary)}</strong></article>
     ${account.leaveDays > 0 ? `<article><span>🏖 أيام إجازة (بدون راتب)</span><strong>${quantityText(account.leaveDays)} يوم</strong></article>` : ""}
     <article><span>السلف المعطاة</span><strong>${money(account.advances)}</strong></article>

@@ -193,6 +193,12 @@ function wireEvents() {
   }
 
   els.menuGrid.addEventListener("click", (event) => {
+    if (posMenuSortMode) {
+      const moveButton = event.target.closest("[data-pos-menu-move]");
+      const card = event.target.closest("[data-menu-item]");
+      if (moveButton && card) movePosMenuItem(card.dataset.menuItem, moveButton.dataset.posMenuMove);
+      return;
+    }
     const comboCard = event.target.closest("[data-combo-id]");
     if (comboCard) {
       addComboToOrder(comboCard.dataset.comboId);
@@ -218,7 +224,33 @@ function wireEvents() {
     if (button) addMenuItemFromGrid(button.dataset.menuItem, undefined, button);
   });
 
+  const posMenuSortButton = document.getElementById("posMenuSortButton");
+  if (posMenuSortButton) posMenuSortButton.addEventListener("click", togglePosMenuSortMode);
+  els.menuGrid.addEventListener("dragstart", (event) => {
+    if (!posMenuSortMode) return;
+    const card = event.target.closest("[data-menu-item]");
+    if (!card) return;
+    posDraggedMenuId = card.dataset.menuItem;
+    card.classList.add("is-dragging");
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+  });
+  els.menuGrid.addEventListener("dragend", (event) => {
+    event.target.closest("[data-menu-item]")?.classList.remove("is-dragging");
+    posDraggedMenuId = null;
+  });
+  els.menuGrid.addEventListener("dragover", (event) => {
+    if (posMenuSortMode && posDraggedMenuId) event.preventDefault();
+  });
+  els.menuGrid.addEventListener("drop", (event) => {
+    if (!posMenuSortMode || !posDraggedMenuId) return;
+    event.preventDefault();
+    const target = event.target.closest("[data-menu-item]");
+    if (!target || target.dataset.menuItem === posDraggedMenuId) return;
+    dropMenuItem(posDraggedMenuId, target.dataset.menuItem);
+  });
+
   els.menuGrid.addEventListener("keydown", (event) => {
+    if (posMenuSortMode) return;
     if (event.key !== "Enter" && event.key !== " ") return;
     const item = event.target.closest("[data-menu-item]");
     if (!item || event.target.closest("[data-menu-option]")) return;
@@ -283,7 +315,15 @@ function wireEvents() {
   });
 
   els.menuSearchInput.addEventListener("input", renderMenu);
+  const posSaleDateInput = document.getElementById("posSaleDateInput");
+  if (posSaleDateInput) posSaleDateInput.addEventListener("change", () => {
+    const order = getOpenOrder();
+    order.saleDate = posSaleDateInput.value || todayDateInputValue();
+    state.lastPosSaleDate = order.saleDate;
+    saveState();
+  });
   els.menuSearchInput.addEventListener("keydown", (event) => {
+    if (posMenuSortMode) return;
     if (event.key !== "Enter") return;
     const firstItem = els.menuGrid.querySelector("[data-menu-item]");
     if (!firstItem) return;
@@ -1254,6 +1294,15 @@ function wireEvents() {
   });
   els.inventorySearchInput.addEventListener("input", renderInventory);
   els.inventoryScopeInput.addEventListener("change", renderInventory);
+  document.querySelectorAll("[data-inventory-scope-quick]").forEach((button) => {
+    button.addEventListener("click", () => {
+      els.inventoryScopeInput.value = button.dataset.inventoryScopeQuick || "purchases";
+      document.querySelectorAll("[data-inventory-scope-quick]").forEach((entry) => {
+        entry.classList.toggle("is-active", entry === button);
+      });
+      renderInventory();
+    });
+  });
   if (els.inventoryStatusInput) els.inventoryStatusInput.addEventListener("change", renderInventory);
   if (els.inventoryAvailabilityInput) els.inventoryAvailabilityInput.addEventListener("change", renderInventory);
   if (els.inventoryStockSortInput) els.inventoryStockSortInput.addEventListener("change", renderInventory);
@@ -1335,6 +1384,7 @@ function wireEvents() {
     }
   });
   els.menuComponentAddButton.addEventListener("click", addMenuComponent);
+  if (els.menuComponentSearchInput) els.menuComponentSearchInput.addEventListener("input", renderMenuComponentSelect);
   const menuOptionAddButton = document.getElementById("menuOptionAddButton");
   if (menuOptionAddButton) menuOptionAddButton.addEventListener("click", addMenuOption);
 
@@ -1357,9 +1407,37 @@ function wireEvents() {
   });
   const menuOptionsList = document.getElementById("menuOptionsList");
   if (menuOptionsList) menuOptionsList.addEventListener("click", (event) => {
+    const addComponentButton = event.target.closest("[data-add-option-component]");
+    if (addComponentButton) {
+      addMenuOptionComponent(addComponentButton.dataset.addOptionComponent);
+      return;
+    }
+    const removeComponentButton = event.target.closest("[data-remove-option-component]");
+    if (removeComponentButton) {
+      const option = menuOptionsDraft.find((entry) => entry.id === removeComponentButton.dataset.removeOptionComponent);
+      if (option) option.components = (option.components || []).filter((component) => component.id !== removeComponentButton.dataset.componentId);
+      renderMenuOptionsEditor();
+      return;
+    }
     const button = event.target.closest("[data-remove-option]");
     if (!button) return;
     menuOptionsDraft = menuOptionsDraft.filter((opt) => opt.id !== button.dataset.removeOption);
+    renderMenuOptionsEditor();
+  });
+  if (menuOptionsList) menuOptionsList.addEventListener("change", (event) => {
+    const operatingToggle = event.target.closest("[data-option-operating-cost]");
+    if (operatingToggle) {
+      const option = menuOptionsDraft.find((entry) => entry.id === operatingToggle.dataset.optionOperatingCost);
+      if (option) option.includeOperatingCost = operatingToggle.checked;
+      renderMenuOptionsEditor();
+      return;
+    }
+    const modeSelect = event.target.closest("[data-option-component-mode]");
+    if (!modeSelect) return;
+    const option = menuOptionsDraft.find((entry) => entry.id === modeSelect.dataset.optionComponentMode);
+    if (!option) return;
+    option.componentMode = modeSelect.value === "custom" ? "custom" : "inherit";
+    if (!Array.isArray(option.components)) option.components = [];
     renderMenuOptionsEditor();
   });
   els.menuComponentsList.addEventListener("click", (event) => {
@@ -1379,6 +1457,8 @@ function wireEvents() {
   els.menuStatsDateToInput.addEventListener("change", renderSettingsMenu);
   els.settingsMenuSearchInput.addEventListener("input", renderSettingsMenu);
   els.settingsMenuList.addEventListener("click", (event) => {
+    const visibilityButton = event.target.closest("[data-toggle-menu-visibility]");
+    if (visibilityButton) { toggleMenuSaleVisibility(visibilityButton.dataset.toggleMenuVisibility); return; }
     const favButton = event.target.closest("[data-toggle-favorite]");
     if (favButton) { toggleMenuFavorite(favButton.dataset.toggleFavorite); return; }
     const moveUp = event.target.closest("[data-move-menu-up]");
@@ -1425,6 +1505,16 @@ if (repairedPersonalReturns > 0) saveState(true);
 applyAppTheme();
 currentUserRole = hasAppPin() ? "cashier" : "manager";
 restoreLastUiLocation();
+renderWorkspaceSwitcher();
+
+els.workspaceProfileSelect?.addEventListener("change", () => activateWorkspace(els.workspaceProfileSelect.value));
+els.workspaceCreateButton?.addEventListener("click", openWorkspaceCreateModal);
+els.workspaceCreateForm?.addEventListener("submit", createContinuationWorkspace);
+els.workspaceCreateCloseButton?.addEventListener("click", closeWorkspaceCreateModal);
+els.workspaceCreateCancelButton?.addEventListener("click", closeWorkspaceCreateModal);
+els.workspaceCreateBackdrop?.addEventListener("click", closeWorkspaceCreateModal);
+document.addEventListener("submit", blockArchivedWorkspaceMutation, true);
+document.addEventListener("click", blockArchivedWorkspaceMutation, true);
 
 const posMobileOrderDock = document.querySelector(".pos-mobile-order-dock");
 if (posMobileOrderDock && els.totalValue) {
@@ -1464,7 +1554,10 @@ applyPrintSize();
 renderPrintSizeSetting();
 renderAutoBackupSetting();
 showLockScreen();
-recoverFromDurableBackup();
+recoverFromDurableBackup()
+  .then(() => repairActiveArchivedWorkspace())
+  .then(() => repairActiveWorkerOpeningAccounts())
+  .catch(() => {});
 startAutoBackupSchedule();
 setTimeout(() => { try { maybeAutoDailyBackup(); } catch (error) {} }, 1800);
 setTimeout(() => { try { maybeDailyFolderBackup(); } catch (error) {} }, 2200);

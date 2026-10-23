@@ -103,6 +103,7 @@ function getOpenOrder(tableId = state.selectedTable) {
       payments: { cash: 0, bank: 0, wallet: 0 },
       changeReturned: 0,
       note: "",
+      saleDate: state.lastPosSaleDate || todayDateInputValue(),
       createdAt: new Date().toISOString()
     };
   }
@@ -173,6 +174,19 @@ function normalizeWorker(worker = {}) {
     phone: String(worker.phone || "").trim(),
     salary,
     salaryHistory,
+    openingDue: Number(worker.openingDue || 0),
+    openingAccount: worker.openingAccount && typeof worker.openingAccount === "object"
+      ? {
+        due: Number(worker.openingAccount.due || worker.openingDue || 0),
+        salary: Number(worker.openingAccount.salary || 0),
+        advances: Number(worker.openingAccount.advances || 0),
+        salaryPaid: Number(worker.openingAccount.salaryPaid || 0),
+        paymentIn: Number(worker.openingAccount.paymentIn || 0),
+        salaryDeductions: Number(worker.openingAccount.salaryDeductions || 0),
+        sourceWorkspace: String(worker.openingAccount.sourceWorkspace || "").trim(),
+        transferredAt: String(worker.openingAccount.transferredAt || "")
+      }
+      : null,
     periodFrom: typeof worker.periodFrom === "string" ? worker.periodFrom : "",
     periodTo: typeof worker.periodTo === "string" ? worker.periodTo.slice(0, 10) : "",
     createdAt: normalizeImportedDate(worker.createdAt || new Date().toISOString()),
@@ -384,7 +398,8 @@ function workerAccountForRange(worker, range) {
   // يُخصم من الراتب: السلف + المشروبات نوع "خصم من الراتب" فقط
   // (مشروبات "سعر عامل" دفعها كاش، فما تُخصم من الراتب — كانت تُحسب مرتين)
   const deductions = transactionStats.advances + drinkStats.salaryDeductions;
-  const due = salary + transactionStats.paymentIn - deductions - transactionStats.salaryPaid;
+  const openingDue = Number(worker?.openingDue || 0);
+  const due = openingDue + salary + transactionStats.paymentIn - deductions - transactionStats.salaryPaid;
   return {
     range: r,
     periodDays,
@@ -398,6 +413,7 @@ function workerAccountForRange(worker, range) {
     advances: transactionStats.advances,
     salaryPaid: transactionStats.salaryPaid,
     paymentIn: transactionStats.paymentIn,
+    openingDue,
     deductions,
     due
   };
@@ -408,8 +424,9 @@ function workerAccountForRange(worker, range) {
 function workerRangeFor(worker) {
   const from = (worker && worker.periodFrom) || currentPeriodRange().minDate;
   const today = todayDateInputValue();
-  let to = today;
-  if (worker && worker.periodTo) to = worker.periodTo < today ? worker.periodTo : today;
+  const workspaceEnd = String(state.workspaceEndedAt || "").slice(0, 10);
+  let to = workspaceEnd && workspaceEnd < today ? workspaceEnd : today;
+  if (worker && worker.periodTo && worker.periodTo < to) to = worker.periodTo;
   if (to < from) to = from;
   return { minDate: from, maxDate: to };
 }
@@ -1507,7 +1524,12 @@ function partnerFundingTotals(entries = state.partnerFundingTransactions || []) 
 }
 
 function partnerFundingBalance(partnerId, options = {}) {
-  return partnerFundingTotals(partnerFundingTransactionsFor(partnerId, options));
+  const totals = partnerFundingTotals(partnerFundingTransactionsFor(partnerId, options));
+  const opening = Math.max(Number(state.partnerOpeningFunding?.[partnerId] || 0), 0);
+  totals.refundableDeposited += opening;
+  totals.outstandingRefundable += opening;
+  totals.physicalCashEffect += opening;
+  return totals;
 }
 
 function partnerFundingPaymentTotals(entries = [], direction = "in") {
@@ -2008,6 +2030,15 @@ function supplierBalances() {
     if (!entry || !date) return;
     if (!entry.lastAt || new Date(date || 0) > new Date(entry.lastAt || 0)) entry.lastAt = date;
   };
+  (state.supplierOpeningBalances || []).forEach((opening) => {
+    const entry = ensure(opening.supplier);
+    if (!entry) return;
+    const amount = Number(opening.owed || 0);
+    entry.owed += amount;
+    if (amount >= 0) entry.directDebts += amount;
+    else entry.creditNotes += Math.abs(amount);
+    touch(entry, opening.createdAt || state.workspaceStartedAt);
+  });
   (state.purchases || []).forEach((purchase) => {
     const entry = ensure(purchase.supplier);
     if (!entry) return;
@@ -2349,15 +2380,24 @@ function normalizeMenuItems(items = []) {
     if (next.stockQty !== undefined && next.stockQty !== null && next.stockQty !== "") {
       next.stockQty = Number(next.stockQty || 0);
     }
+    if (next.finishedStockQty !== undefined && next.finishedStockQty !== null && next.finishedStockQty !== "") {
+      next.finishedStockQty = Number(next.finishedStockQty || 0);
+    }
     next.cost = Math.max(Number(next.cost || 0), 0);
+    next.manualLastUnitCost = Math.max(Number(next.manualLastUnitCost || 0), 0);
     next.operatingCost = Math.max(Number(next.operatingCost || 0), 0);
     next.operatingCostType = operatingCostTypes.includes(next.operatingCostType) ? next.operatingCostType : "other";
     next.stockUnit = normalizeUnit(next.stockUnit || next.unit || "");
     next.components = normalizeMenuComponents(next.components || [], next.id);
     next.options = normalizeMenuOptions(next.options || []);
     next.favorite = !!next.favorite;
+    next.saleVisible = next.saleVisible !== false;
     return next;
   });
+}
+
+function menuItemIsSaleVisible(item) {
+  return Boolean(item) && item.saleVisible !== false;
 }
 
 function normalizeMenuOptions(options = []) {
@@ -2366,7 +2406,10 @@ function normalizeMenuOptions(options = []) {
     .map((opt) => ({
       id: opt.id || uid("opt"),
       label: String(opt.label || opt.name || "").trim(),
-      price: Math.max(Number(opt.price || 0), 0)
+      price: Math.max(Number(opt.price || 0), 0),
+      componentMode: opt.componentMode === "custom" ? "custom" : "inherit",
+      includeOperatingCost: opt.includeOperatingCost !== false,
+      components: normalizeMenuComponents(opt.components || [])
     }))
     .filter((opt) => opt.label && opt.price > 0);
 }
@@ -2414,6 +2457,17 @@ function stockText(item) {
 function menuItemDisplayStock(item) {
   const components = ENABLE_STOCK_COMPONENTS ? menuItemComponents(item) : [];
   if (components.length) {
+    if (item.finishedStockQty !== undefined && item.finishedStockQty !== null && item.finishedStockQty !== "") {
+      const finishedQty = Number(item.finishedStockQty || 0);
+      return {
+        tracked: true,
+        qty: finishedQty,
+        unit: itemUnit(item) || "وحدة",
+        text: `${quantityWithUnit(finishedQty, itemUnit(item) || "وحدة")} من الجرد`,
+        isLow: finishedQty <= 0,
+        source: "finished"
+      };
+    }
     const possibleUnits = components.map((component) => {
       const stockItem = inventoryItemById(component.itemId);
       const requiredQty = Number(component.qty || 0);
@@ -2459,7 +2513,7 @@ function findMenuItemByName(name) {
 function adjustMenuStock(itemId, qtyDelta) {
   const item = findMenuItem(itemId);
   if (!item || !Number.isFinite(Number(qtyDelta))) return null;
-  item.stockQty = (isStockTracked(item) ? Number(item.stockQty || 0) : 0) + Number(qtyDelta);
+  item.stockQty = Math.max((isStockTracked(item) ? Number(item.stockQty || 0) : 0) + Number(qtyDelta), 0);
   item.updatedAt = new Date().toISOString();
   return item;
 }
@@ -2521,6 +2575,28 @@ function stockUsageFromMenuItem(item) {
   return usage.filter((line) => line.itemId && Number(line.qty || 0) > 0);
 }
 
+function stockUsageFromMenuOption(item, option) {
+  if (!option || option.componentMode !== "custom") return stockUsageFromMenuItem(item);
+  return mergeStockUsage(normalizeMenuComponents(option.components || [], item?.id || "").map((component) => ({
+    itemId: component.itemId,
+    name: component.purchaseItemName || inventoryItemById(component.itemId)?.name || "مكون مخزون",
+    qty: component.qty,
+    unit: component.unit || itemUnit(inventoryItemById(component.itemId))
+  })));
+}
+
+function menuOptionRecipeCost(item, option) {
+  if (!option) return menuItemRecipeCost(item);
+  const operatingCost = option.includeOperatingCost === false ? 0 : menuItemOperatingCost(item);
+  if (option.componentMode !== "custom") {
+    return Math.max(menuItemRecipeCost(item) - menuItemOperatingCost(item), 0) + operatingCost;
+  }
+  const componentsCost = normalizeMenuComponents(option.components || [], item?.id || "").reduce((sum, component) => {
+    return sum + stockItemRecipeUnitCost(inventoryItemById(component.itemId)) * Number(component.qty || 0);
+  }, 0);
+  return componentsCost + operatingCost;
+}
+
 function mergeStockUsage(usage = []) {
   const merged = new Map();
   usage.forEach((line) => {
@@ -2551,27 +2627,53 @@ function applySoldStockUsage(items = [], direction = -1) {
   items.forEach((line) => {
     const lineQty = Number(line.qty || 0);
     if (lineQty <= 0) return;
+    const soldMenuItem = findMenuItem(line.id);
+    if (soldMenuItem && menuItemComponents(soldMenuItem).length && soldMenuItem.finishedStockQty !== undefined) {
+      const availableQty = Math.max(Number(soldMenuItem.finishedStockQty || 0), 0);
+      const appliedQty = direction < 0 ? Math.min(lineQty, availableQty) : lineQty;
+      soldMenuItem.finishedStockQty = Math.max(availableQty + (direction * appliedQty), 0);
+      soldMenuItem.updatedAt = new Date().toISOString();
+      results.push({
+        kind: "finished",
+        itemId: soldMenuItem.id,
+        name: soldMenuItem.name,
+        unit: itemUnit(soldMenuItem),
+        requestedQty: lineQty,
+        appliedQty,
+        uncoveredQty: direction < 0 ? Math.max(lineQty - appliedQty, 0) : 0,
+        delta: direction * appliedQty,
+        applied: appliedQty > 0
+      });
+    }
     stockUsageForSoldLine(line).forEach((usage) => {
       const usedQty = lineQty * Number(usage.qty || 0);
-      const delta = direction * usedQty;
       let adjusted = null;
+      let stockItem = null;
       if (isPurchaseInventoryId(usage.itemId)) {
-        adjusted = adjustPurchaseInventoryStock(usage.itemId, delta);
-        if (!adjusted && typeof purchaseInventoryItemFromUsage === "function") {
-          const fallbackItem = purchaseInventoryItemFromUsage(usage);
-          if (fallbackItem) adjusted = adjustPurchaseInventoryStock(fallbackItem.id, delta);
+        stockItem = inventoryItemById(usage.itemId);
+        if (!stockItem && typeof purchaseInventoryItemFromUsage === "function") {
+          stockItem = purchaseInventoryItemFromUsage(usage);
         }
       } else {
-        adjusted = adjustMenuStock(usage.itemId, delta);
+        stockItem = findMenuItem(usage.itemId);
       }
+      const availableQty = Math.max(Number(stockItem?.stockQty || 0), 0);
+      const appliedQty = direction < 0 ? Math.min(usedQty, availableQty) : usedQty;
+      const delta = direction * appliedQty;
+      if (stockItem) adjusted = isPurchaseInventoryId(stockItem.id)
+        ? adjustPurchaseInventoryStock(stockItem.id, delta)
+        : adjustMenuStock(stockItem.id, delta);
       results.push({
         ...usage,
         itemId: adjusted?.id || usage.itemId,
         name: adjusted?.name || usage.name,
         unit: usage.unit || itemUnit(adjusted),
         qty: usedQty,
+        requestedQty: usedQty,
+        appliedQty,
+        uncoveredQty: direction < 0 ? Math.max(usedQty - appliedQty, 0) : 0,
         delta,
-        applied: Boolean(adjusted)
+        applied: Boolean(adjusted) && appliedQty > 0
       });
     });
   });
@@ -2579,11 +2681,80 @@ function applySoldStockUsage(items = [], direction = -1) {
 }
 
 function reduceStockForSoldItems(items = []) {
-  return applySoldStockUsage(items, -1);
+  const results = [];
+  (items || []).forEach((line) => {
+    const lineResults = applySoldStockUsage([line], -1);
+    mergeSoldStockAppliedUsage(line, lineResults);
+    results.push(...lineResults);
+  });
+  return results;
 }
 
 function restoreStockForSoldItems(items = []) {
-  return applySoldStockUsage(items, 1);
+  const results = [];
+  (items || []).forEach((line) => {
+    const appliedUsage = soldStockAppliedUsage(line);
+    if (appliedUsage.length) {
+      results.push(...restoreSoldStockAppliedUsage(line, 1));
+    } else {
+      results.push(...applySoldStockUsage([line], 1));
+    }
+  });
+  return results;
+}
+
+function soldStockAppliedUsage(line) {
+  return Array.isArray(line?.stockAppliedUsage)
+    ? line.stockAppliedUsage.filter((usage) => Number(usage?.appliedQty || 0) > 0 || Number(usage?.uncoveredQty || 0) > 0)
+    : [];
+}
+
+function mergeSoldStockAppliedUsage(line, results = []) {
+  if (!line) return;
+  const merged = new Map(soldStockAppliedUsage(line).map((usage) => [`${usage.kind || "stock"}:${usage.itemId}`, { ...usage }]));
+  results.forEach((result) => {
+    const key = `${result.kind || "stock"}:${result.itemId}`;
+    const current = merged.get(key) || { ...result, requestedQty: 0, appliedQty: 0, uncoveredQty: 0 };
+    current.requestedQty = Number(current.requestedQty || 0) + Number(result.requestedQty || result.qty || 0);
+    current.appliedQty = Number(current.appliedQty || 0) + Number(result.appliedQty || 0);
+    current.uncoveredQty = Number(current.uncoveredQty || 0) + Number(result.uncoveredQty || 0);
+    merged.set(key, current);
+  });
+  line.stockAppliedUsage = [...merged.values()];
+}
+
+function restoreSoldStockAppliedUsage(line, ratio = 1) {
+  const safeRatio = Math.min(Math.max(Number(ratio || 0), 0), 1);
+  const remaining = [];
+  const results = [];
+  soldStockAppliedUsage(line).forEach((usage) => {
+    const restoreQty = Number(usage.appliedQty || 0) * safeRatio;
+    let adjusted = null;
+    if (restoreQty > 0) {
+      if (usage.kind === "finished") {
+        adjusted = findMenuItem(usage.itemId);
+        if (adjusted) {
+          adjusted.finishedStockQty = Math.max(Number(adjusted.finishedStockQty || 0), 0) + restoreQty;
+          adjusted.updatedAt = new Date().toISOString();
+        }
+      } else if (isPurchaseInventoryId(usage.itemId)) {
+        adjusted = adjustPurchaseInventoryStock(usage.itemId, restoreQty);
+      } else {
+        adjusted = adjustMenuStock(usage.itemId, restoreQty);
+      }
+    }
+    results.push({ ...usage, qty: restoreQty, delta: restoreQty, applied: Boolean(adjusted) });
+    const rest = {
+      ...usage,
+      requestedQty: Number(usage.requestedQty || 0) * (1 - safeRatio),
+      appliedQty: Number(usage.appliedQty || 0) * (1 - safeRatio),
+      uncoveredQty: Number(usage.uncoveredQty || 0) * (1 - safeRatio)
+    };
+    if (rest.appliedQty > 0.000001 || rest.uncoveredQty > 0.000001) remaining.push(rest);
+  });
+  if (remaining.length) line.stockAppliedUsage = remaining;
+  else delete line.stockAppliedUsage;
+  return results;
 }
 
 function soldLineQty(line) {
@@ -2610,14 +2781,17 @@ function stockAdjustmentLine(line, qty) {
     qty,
     stockUsage: Array.isArray(line?.stockUsage)
       ? line.stockUsage.map((usage) => ({ ...usage }))
-      : line?.stockUsage
+      : line?.stockUsage,
+    stockAppliedUsage: []
   };
 }
 
 function reserveSoldLineStock(line, qtyDelta = 1) {
   const qty = Math.max(Number(qtyDelta || 0), 0);
   if (!line || qty <= 0 || !stockUsageForSoldLine(line).length) return [];
-  const results = reduceStockForSoldItems([stockAdjustmentLine(line, qty)]);
+  const adjustmentLine = stockAdjustmentLine(line, qty);
+  const results = reduceStockForSoldItems([adjustmentLine]);
+  mergeSoldStockAppliedUsage(line, results);
   setSoldStockReservationQty(line, soldStockReservationQty(line) + qty);
   return results;
 }
@@ -2630,7 +2804,9 @@ function releaseSoldLineReservedStock(line, qtyDelta = Infinity) {
     : currentReserved;
   const qty = Math.min(currentReserved, requestedQty);
   if (qty <= 0) return [];
-  const results = restoreStockForSoldItems([stockAdjustmentLine(line, qty)]);
+  const results = soldStockAppliedUsage(line).length
+    ? restoreSoldStockAppliedUsage(line, qty / currentReserved)
+    : applySoldStockUsage([stockAdjustmentLine(line, qty)], 1);
   setSoldStockReservationQty(line, currentReserved - qty);
   return results;
 }

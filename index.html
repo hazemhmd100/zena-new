@@ -21,7 +21,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800;900&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./styles.css?v=20261017-dashboard-01" />
+  <link rel="stylesheet" href="./styles.css?v=20261023-editable-pos-date-01" />
   </head>
   <body>
     <div class="app-shell">
@@ -50,6 +50,11 @@
           <button class="tab-button" data-view="guide" type="button">📖 دليل</button>
         </nav>
         <div class="topbar-actions">
+          <div class="workspace-switcher" data-manager-only>
+            <label for="workspaceProfileSelect">ملف العمل</label>
+            <select id="workspaceProfileSelect" aria-label="اختيار ملف العمل"></select>
+            <button class="icon-button" id="workspaceCreateButton" type="button" title="بدء ملف عمل جديد" aria-label="بدء ملف عمل جديد">+</button>
+          </div>
           <button class="role-toggle-button" id="roleToggleButton" type="button">مدير</button>
           <button class="theme-toggle-button" id="themeToggleButton" type="button" title="تبديل الوضع الليلي" aria-label="تبديل الوضع الليلي">
             <span class="theme-toggle-icon" aria-hidden="true">☾</span>
@@ -57,6 +62,11 @@
           </button>
         </div>
       </header>
+
+      <div class="workspace-readonly-banner" id="workspaceReadonlyBanner" hidden>
+        <strong>أنت داخل ملف قديم للعرض فقط</strong>
+        <span>يمكنك البحث والطباعة ومراجعة كل البيانات، لكن التسجيل محفوظ للملف الحالي.</span>
+      </div>
 
       <div class="backup-reminder-banner" id="backupReminderBanner" hidden>
         <span id="backupReminderText">⚠️ صار أسبوع ما أخذت نسخة احتياطية — بياناتك كلها على هذا الجهاز فقط!</span>
@@ -134,6 +144,10 @@
                   <input id="tableNameInput" type="text" placeholder="مثال: طاولة الشباب" autocomplete="off" />
                 </label>
                 <span class="status-pill" id="orderStatus">فارغ</span>
+                <label class="pos-sale-date-field" title="تاريخ الفاتورة">
+                  <span>التاريخ</span>
+                  <input id="posSaleDateInput" type="date" />
+                </label>
                 </div>
 
                 <details class="pos-collapse" id="customerCollapse">
@@ -183,7 +197,10 @@
                 </details>
               </div>
 
-              <div class="menu-categories" id="menuCategories" aria-label="تصنيفات الأصناف"></div>
+              <div class="pos-menu-list-head">
+                <div class="menu-categories" id="menuCategories" aria-label="تصنيفات الأصناف"></div>
+                <button class="secondary-button pos-menu-sort-button" id="posMenuSortButton" type="button">ترتيب الأصناف</button>
+              </div>
               <div class="menu-grid" id="menuGrid"></div>
 
             </section>
@@ -1506,7 +1523,7 @@
                 <span>عرض</span>
                 <select id="inventoryScopeInput">
                   <option value="purchases">مخزون المشتريات</option>
-                  <option value="sales">أصناف البيع</option>
+                  <option value="sales">أصناف البيع الجاهزة</option>
                   <option value="all">كل المخزون</option>
                 </select>
               </label>
@@ -1540,7 +1557,11 @@
 
           <div class="inventory-pane-layout inventory-stock-layout is-active" id="inventoryStockPane" data-inventory-pane-panel="stock" role="tabpanel" aria-label="المخزون">
             <div class="inventory-stock-dashboard">
-              <section class="panel low-stock-panel" id="lowStockPanel">
+              <details class="panel low-stock-panel inventory-secondary-panel" id="lowStockPanel">
+                <summary class="inventory-secondary-summary">
+                  <span><b>مواد ناقصة واقتراحات الشراء</b><small>افتحها عند تجهيز الطلبية</small></span>
+                  <strong>عرض</strong>
+                </summary>
                 <div class="panel-header">
                   <div>
                     <h3>مواد ناقصة للشراء</h3>
@@ -1553,7 +1574,7 @@
                 </div>
                 <div class="low-stock-list" id="lowStockList"></div>
                 <div class="purchase-suggestions-list" id="purchaseSuggestionsList"></div>
-              </section>
+              </details>
 
               <section class="panel inventory-stock-panel">
                 <div class="panel-header inventory-stock-panel-header">
@@ -1572,6 +1593,13 @@
                     </select>
                   </label>
                 </div>
+                <div class="inventory-stock-summary" id="inventoryStockSummary"></div>
+                <div class="inventory-tool-shelf">
+                <details class="inventory-tool-panel">
+                  <summary>
+                    <span><b>إضافة مادة موجودة</b><small>إدخال رصيد افتتاحي بدون فاتورة شراء</small></span>
+                    <strong>فتح</strong>
+                  </summary>
                 <form class="inventory-manual-card" id="inventoryManualForm" autocomplete="off">
                   <div class="inventory-manual-head">
                     <div>
@@ -1616,6 +1644,12 @@
                     </label>
                   </div>
                 </form>
+                </details>
+                <details class="inventory-tool-panel inventory-tool-panel-danger">
+                  <summary>
+                    <span><b>تسجيل تالف أو هدر</b><small>خصم كمية تالفة من المخزون</small></span>
+                    <strong>فتح</strong>
+                  </summary>
                 <form class="inventory-manual-card inventory-waste-card" id="inventoryWasteForm" autocomplete="off">
                   <div class="inventory-manual-head">
                     <div>
@@ -1643,11 +1677,16 @@
                   </div>
                   <div class="inventory-waste-list" id="inventoryWasteList"></div>
                 </form>
-                <div class="inventory-stock-summary" id="inventoryStockSummary"></div>
+                </details>
+                </div>
                 <div class="inventory-stock-list" id="inventoryStockList"></div>
               </section>
 
-              <section class="panel inventory-history-panel">
+              <details class="panel inventory-history-panel inventory-secondary-panel">
+                <summary class="inventory-secondary-summary">
+                  <span><b>سجل الجرد السابق</b><small>الاعتمادات والفروقات المحفوظة</small></span>
+                  <strong>عرض</strong>
+                </summary>
                 <div class="panel-header">
                   <div>
                     <h3>سجل الجرد</h3>
@@ -1666,11 +1705,22 @@
                   <button class="secondary-button" type="button" id="inventoryHistoryDateClearButton">✖ مسح التاريخ</button>
                 </div>
                 <div class="inventory-history-list" id="inventoryHistoryList"></div>
-              </section>
+              </details>
             </div>
           </div>
 
           <div class="inventory-pane-layout inventory-count-layout" id="inventoryCountPane" data-inventory-pane-panel="count" role="tabpanel" aria-label="الجرد" hidden>
+            <div class="inventory-count-scope" role="group" aria-label="نوع الجرد">
+              <button class="is-active" type="button" data-inventory-scope-quick="purchases">مواد الشراء</button>
+              <button type="button" data-inventory-scope-quick="sales">أصناف البيع الموجودة</button>
+              <button type="button" data-inventory-scope-quick="all">الجميع</button>
+            </div>
+            <div class="inventory-count-steps" aria-label="خطوات الجرد">
+              <span><b>1</b> اختر المواد</span>
+              <span><b>2</b> أدخل الموجود فعليًا</span>
+              <span><b>3</b> راجع الفروقات</span>
+              <span><b>4</b> اعتمد الجرد</span>
+            </div>
             <div class="inventory-summary" id="inventorySummary"></div>
             <section class="inventory-count-col panel">
               <div class="inventory-count-header">
@@ -1707,6 +1757,10 @@
                   <input id="menuCostInput" type="number" min="0" step="any" inputmode="decimal" placeholder="اختياري مع المكونات" />
                 </label>
                 <label class="field compact">
+                  <span>آخر سعر شراء يدوي للوحدة</span>
+                  <input id="menuManualLastUnitCostInput" type="number" min="0" step="any" inputmode="decimal" placeholder="يظهر عند عدم وجود فاتورة مرتبطة" />
+                </label>
+                <label class="field compact">
                   <span>تشغيل للوحدة</span>
                   <input id="menuOperatingCostInput" type="number" min="0" step="any" inputmode="decimal" placeholder="غاز، كهربا، عمال..." />
                 </label>
@@ -1729,6 +1783,10 @@
                     <p>اختَر أكثر من مادة وحدد كمية الاستهلاك لكل عملية بيع</p>
                   </div>
                   <div class="menu-component-controls">
+                    <label class="field compact">
+                      <span>ابحث في المخزون</span>
+                      <input id="menuComponentSearchInput" type="search" placeholder="اكتب اسم المادة" autocomplete="off" />
+                    </label>
                     <label class="field compact">
                       <span>صنف من المخزون</span>
                       <select id="menuComponentItemInput"></select>
@@ -2239,6 +2297,27 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+    <div class="customer-edit-modal" id="workspaceCreateModal" hidden role="dialog" aria-modal="true" aria-labelledby="workspaceCreateTitle">
+      <div class="customer-edit-backdrop" id="workspaceCreateBackdrop"></div>
+      <form class="customer-edit-card workspace-create-card" id="workspaceCreateForm">
+        <div class="customer-edit-head">
+          <div><h3 id="workspaceCreateTitle">بدء ملف عمل جديد</h3><p>سيبقى الملف الحالي محفوظًا للرجوع إليه.</p></div>
+          <button class="icon-button customer-edit-close" id="workspaceCreateCloseButton" type="button" aria-label="إغلاق">×</button>
+        </div>
+        <label class="field"><span>اسم الملف الجديد</span><input id="workspaceNameInput" type="text" maxlength="50" placeholder="مثال: العمل الجديد 2026" required /></label>
+        <div class="workspace-transfer-summary">
+          <strong>سيتم نقل</strong>
+          <span>العملاء والأصناف والموردون والعمال والشركاء</span>
+          <span>الأرصدة الحالية والمخزون الفعلي والصندوق</span>
+          <small>لن تُنقل الفواتير والمصاريف والحركات القديمة؛ ستبقى في الملف القديم.</small>
+        </div>
+        <div class="customer-edit-actions">
+          <button class="secondary-button" id="workspaceCreateCancelButton" type="button">إلغاء</button>
+          <button class="primary-button" type="submit">إنشاء وفتح الملف الجديد</button>
+        </div>
+      </form>
+    </div>
+
     <template id="printTemplate">
       <section class="print-invoice" dir="rtl">
         <h1>دفتر المقهى</h1>
@@ -2248,17 +2327,17 @@
       </section>
     </template>
 
-  <script src="./js/01-core.js?v=20261005-auto-personal-return-01" defer></script>
-  <script src="./js/02-domain.js?v=20261007-customer-offset-01" defer></script>
-  <script src="./js/03-pos.js?v=20261017-dashboard-01" defer></script>
+  <script src="./js/01-core.js?v=20261023-sticky-pos-date-01" defer></script>
+  <script src="./js/02-domain.js?v=20261023-sticky-pos-date-01" defer></script>
+  <script src="./js/03-pos.js?v=20261023-sticky-pos-date-01" defer></script>
   <script src="./js/04-customers-invoices.js?v=20261007-customer-offset-01" defer></script>
-  <script src="./js/05-workers.js?v=20261005-auto-personal-total-01" defer></script>
-  <script src="./js/06-inventory-menu.js?v=20260926-inventory-info-01" defer></script>
-  <script src="./js/07-reports.js?v=20261007-customer-offset-01" defer></script>
-  <script src="./js/08-checkout.js?v=20260824-01" defer></script>
-  <script src="./js/09-actions.js?v=20261008-purchase-unit-price-01" defer></script>
+  <script src="./js/05-workers.js?v=20261020-worker-carry-01" defer></script>
+  <script src="./js/06-inventory-menu.js?v=20261019-stock-floor-01" defer></script>
+  <script src="./js/07-reports.js?v=20261019-complete-backup-01" defer></script>
+  <script src="./js/08-checkout.js?v=20261023-sticky-pos-date-01" defer></script>
+  <script src="./js/09-actions.js?v=20261019-inventory-component-search-01" defer></script>
   <script src="./js/10-close.js?v=20261004-personal-withdrawal-return-01" defer></script>
-  <script src="./js/11-extras.js?v=20260926-inventory-info-01" defer></script>
-  <script src="./js/12-init.js?v=20261008-purchase-unit-price-01" defer></script>
+  <script src="./js/11-extras.js?v=20261020-worker-carry-01" defer></script>
+  <script src="./js/12-init.js?v=20261023-sticky-pos-date-01" defer></script>
   </body>
 </html>
